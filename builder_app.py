@@ -10,15 +10,19 @@ import os
 import queue
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
+import urllib.parse
+import webbrowser
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
+import banks  # noqa: E402
 import library  # noqa: E402
 
 BG = "#1b1e27"
@@ -38,6 +42,7 @@ SKELETON = (
     "tools/find_game.py",
     "tools/setup.py",
     "tools/library.py",
+    "tools/banks.py",
     "src/.gitkeep",
     "include/.gitkeep",
     "notes/.gitkeep",
@@ -145,10 +150,10 @@ def copy_skeleton(dest):
             shutil.copy2(src, target)
 
 
-def write_readme(dest, game, exe_name, digest):
+def write_readme(dest, title, exe_name, digest):
     path = os.path.join(dest, "README.md")
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write("# %s\n\n" % game["name"])
+        handle.write("# %s\n\n" % title)
         handle.write("Created by PC Decomp Project Builder.\n\n")
         handle.write("The executable is `orig/%s`.\n\n" % exe_name)
         handle.write("SHA1 `%s`.\n\n" % digest)
@@ -204,6 +209,7 @@ class Builder(tk.Tk):
         self.minsize(720, 560)
         self.configure(bg=BG)
         self.games = []
+        self.picked = None
         self.events = queue.Queue()
         self.busy = False
         self._build()
@@ -240,6 +246,7 @@ class Builder(tk.Tk):
         self.game_list = tk.Listbox(
             left, bg=FIELD, fg=TEXT, selectbackground=ACCENT, selectforeground="#111",
             highlightthickness=0, relief="flat", font=("Segoe UI", 10), activestyle="none",
+            exportselection=False,
         )
         self.game_list.pack(fill="both", expand=True, pady=(4, 0))
         self.game_list.bind("<<ListboxSelect>>", self._on_select)
@@ -267,7 +274,8 @@ class Builder(tk.Tk):
             right, text="Create project", command=self.create_project, bg=ACCENT, fg="#111", relief="flat", padx=12, pady=8
         )
         self.create_button.pack(fill="x")
-        tk.Button(right, text="Refresh games", command=self.refresh_games, bg=PANEL, fg=TEXT, relief="flat", padx=12, pady=6).pack(fill="x", pady=(8, 0))
+        tk.Button(right, text="Open workbench", command=self.open_workbench, bg=PANEL, fg=TEXT, relief="flat", padx=12, pady=6).pack(fill="x", pady=(8, 0))
+        tk.Button(right, text="Refresh games", command=self.refresh_games, bg=PANEL, fg=TEXT, relief="flat", padx=12, pady=6).pack(fill="x")
 
         tk.Label(self, text="Log", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", padx=20, pady=(8, 0))
         self.log = tk.Text(self, height=8, bg=FIELD, fg=TEXT, relief="flat", font=("Consolas", 9), wrap="word")
@@ -292,6 +300,8 @@ class Builder(tk.Tk):
                     self.busy = False
                     self.create_button.configure(state="normal")
                     self.refresh_tools()
+                elif kind == "workbench":
+                    launch_workbench(payload)
                 elif kind == "error":
                     messagebox.showerror("PC Decomp Project Builder", payload)
         except queue.Empty:
@@ -337,13 +347,22 @@ class Builder(tk.Tk):
         game = self._selected()
         if not game:
             return
+        self.picked = game
         chosen = game["exe"]
         if chosen:
             self.exe_var.set(os.path.join(game["directory"], chosen.replace("/", os.sep)))
         else:
             self.exe_var.set("")
-        self.name_var.set(game["name"])
         self.path_label.configure(text=game["directory"])
+
+    def open_workbench(self):
+        title = self.name_var.get().strip()
+        parent = self.folder_var.get().strip()
+        dest = os.path.join(parent, slug(title)) if title and parent else ""
+        if not os.path.isdir(dest):
+            dest = filedialog.askdirectory(title="Decomp project")
+        if dest:
+            launch_workbench(dest)
 
     def _browse(self):
         chosen = filedialog.askdirectory(initialdir=self.folder_var.get() or os.path.dirname(ROOT))
@@ -395,7 +414,7 @@ class Builder(tk.Tk):
     def create_project(self):
         if self.busy:
             return
-        game = self._selected()
+        game = self._selected() or self.picked
         if not game:
             messagebox.showinfo("PC Decomp Project Builder", "Pick a game from the list.")
             return
@@ -404,11 +423,15 @@ class Builder(tk.Tk):
             messagebox.showinfo("PC Decomp Project Builder", "Choose the game executable. You can type the path or use ....")
             return
         exe_name = os.path.basename(exe_path)
+        title = self.name_var.get().strip()
+        if not title:
+            messagebox.showinfo("PC Decomp Project Builder", "Type a project name. The store title is not used.")
+            return
         parent = self.folder_var.get().strip()
         if not parent:
             messagebox.showinfo("PC Decomp Project Builder", "Choose a projects folder.")
             return
-        dest = os.path.join(parent, slug(self.name_var.get() or game["name"]))
+        dest = os.path.join(parent, slug(title))
         updating = os.path.isdir(dest)
         self._busy()
         self._log("Updating %s" % dest if updating else "Creating %s" % dest)
@@ -421,18 +444,50 @@ class Builder(tk.Tk):
                 write_project(dest, game, exe_name)
                 digest = copy_chosen_exe(dest, exe_path)
                 pin_hash(dest, exe_name, digest)
+                count = banks.write_splits(exe_path, os.path.join(dest, "config", "splits.txt"))
+                self.events.put(("log", "Wrote %s banks to config/splits.txt" % count))
+                dtk = find_tools()["dtk"]
+                if dtk:
+                    self.events.put(("log", "Splitting the executable"))
+                    proc = subprocess.run(
+                        [dtk, "-C", dest, "coff", "split", "--no-update", "config/dtk.yml", "build/base"],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if proc.returncode != 0:
+                        detail = (proc.stderr or proc.stdout or "dtk split failed").strip()
+                        self.events.put(("log", detail))
+                    else:
+                        self.events.put(("log", "Split objects are in build/base"))
                 write_tools_json(dest)
-                write_readme(dest, game, exe_name, digest)
+                write_readme(dest, title, exe_name, digest)
                 self.events.put(("log", "Project ready at %s" % dest))
                 self.events.put(("log", "Executable %s" % exe_name))
                 self.events.put(("log", "SHA1 %s" % digest))
                 os.startfile(dest)
+                self.events.put(("workbench", dest))
             except Exception as exc:
                 self.events.put(("error", str(exc)))
             finally:
                 self.events.put(("idle", None))
 
         threading.Thread(target=work, daemon=True).start()
+
+
+def launch_workbench(project):
+    script = os.path.join(ROOT, "tools", "workbench.py")
+    sock = socket.socket()
+    running = False
+    try:
+        sock.connect(("127.0.0.1", 8765))
+        running = True
+    except OSError:
+        running = False
+    finally:
+        sock.close()
+    if not running:
+        subprocess.Popen([sys.executable, script, project], cwd=ROOT)
+    webbrowser.open("http://127.0.0.1:8765/?project=" + urllib.parse.quote(os.path.abspath(project)))
 
 
 def main():

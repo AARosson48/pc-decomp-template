@@ -5,6 +5,8 @@
 /project.local.json
 /tools.json
 /msvc6/
+/tools/ghidra/
+/tools/jdk/
 /tools/bin/**
 !/tools/bin/.gitkeep
 __pycache__/

@@ -29,7 +29,9 @@ Python 3.10 or newer, on Windows. Git is required for the compiler clone. Double
 
 PC Decomp Project Builder is one window. **Install tools** downloads Ninja, Capstone, decomp-toolkit, objdiff, the Binary Ninja Free installer, and the MSVC 6 tree into this builder. Those stay here and are shared by every project. Binary Ninja Free is for non-commercial use.
 
-The list is the Steam and GOG games already installed on this PC. Pick one, check the executable, and **Create project**. That makes a new folder with `orig/`, the SHA1 in `config/dtk.yml`, and `tools.json` pointing back at this builder. Archives stay in the store install.
+The list is the Steam and GOG games already installed on this PC. Pick one, type a project name, check the executable, and **Create project**. That makes a new folder with `orig/`, the SHA1 in `config/dtk.yml`, `config/splits.txt` cut into banks of about 16KB, and split objects under `build/base` when decomp-toolkit is available. `tools.json` points back at this builder. Archives stay in the store install.
+
+**Open workbench** starts a local page with four panes for the selected function: C/C++ code, Ghidra pseudo C, source assembly from the original executable, and compiled assembly from your C. Ghidra runs headless. The first function waits while it analyzes the executable. Draft C turns the pseudo C into something MSVC 6 can compile. Ask AI sends the four panes to a local Ollama model and replaces the C draft. Save writes the function into `src/bank/<bank>.cpp` and `config/dtk_symbols.txt`. Score compiles it with MSVC 6 and runs objdiff. Build report writes `build/report.json`. An AI connects with `python tools/mcp_server.py <project folder>`.
 
 `python install.py` asks the same questions in the console and sets up this folder instead of a new project.
 

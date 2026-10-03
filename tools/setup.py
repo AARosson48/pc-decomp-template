@@ -21,6 +21,8 @@ DTK_URL = "https://github.com/openblack/decomp-toolkit/releases/download/v0.0.27
 OBJDIFF_CLI_URL = "https://github.com/encounter/objdiff/releases/download/v3.8.2/objdiff-cli-windows-x86_64.exe"
 OBJDIFF_GUI_URL = "https://github.com/encounter/objdiff/releases/download/v3.8.2/objdiff-windows-x86_64.exe"
 MSVC_URL = "https://github.com/itsmattkc/MSVC600.git"
+GHIDRA_URL = "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip"
+JDK_URL = "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk"
 
 
 def download(url, dest):
@@ -45,6 +47,40 @@ def binary_ninja_url():
             if asset.get("name") == "binaryninja_free_win64.exe":
                 return asset["browser_download_url"]
     sys.exit("No binaryninja_free_win64.exe on the recent Vector35 releases.")
+
+
+def install_ghidra():
+    import zipfile
+    ghidra_root = os.path.join(ROOT, "tools", "ghidra")
+    jdk_root = os.path.join(ROOT, "tools", "jdk")
+    os.makedirs(ghidra_root, exist_ok=True)
+    os.makedirs(jdk_root, exist_ok=True)
+    if not _headless(ghidra_root):
+        archive = os.path.join(ghidra_root, "ghidra.zip")
+        download(GHIDRA_URL, archive)
+        print("extract Ghidra")
+        with zipfile.ZipFile(archive) as handle:
+            handle.extractall(ghidra_root)
+    if not _jdk21(jdk_root):
+        archive = os.path.join(jdk_root, "jdk.zip")
+        download(JDK_URL, archive)
+        print("extract JDK 21")
+        with zipfile.ZipFile(archive) as handle:
+            handle.extractall(jdk_root)
+
+
+def _headless(path):
+    for dirpath, _dirs, files in os.walk(path):
+        if "analyzeHeadless.bat" in files:
+            return os.path.join(dirpath, "analyzeHeadless.bat")
+    return ""
+
+
+def _jdk21(path):
+    for dirpath, _dirs, files in os.walk(path):
+        if "java.exe" in files and os.path.basename(dirpath).lower() == "bin":
+            return os.path.dirname(dirpath)
+    return ""
 
 
 def clone_msvc():
@@ -72,6 +108,7 @@ def main():
     download(OBJDIFF_CLI_URL, os.path.join(BIN, "objdiff-cli.exe"))
     download(OBJDIFF_GUI_URL, os.path.join(BIN, "objdiff.exe"))
     download(binary_ninja_url(), os.path.join(BIN, "binaryninja_free_win64.exe"))
+    install_ghidra()
     clone_msvc()
 
     installer = os.path.join(BIN, "binaryninja_free_win64.exe")
@@ -80,6 +117,8 @@ def main():
     print("MSVC 6 cl.exe is msvc6/VC98/Bin/cl.exe when the clone finishes.")
     print("Binary Ninja Free is non-commercial. The installer is:")
     print("  %s" % installer)
+    print("Ghidra 12.1.4 and JDK 21 are under tools/ghidra and tools/jdk.")
+    print("The workbench uses them headless for pseudo C.")
 
 
 if __name__ == "__main__":
