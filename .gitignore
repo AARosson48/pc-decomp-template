@@ -1,0 +1,13 @@
+/build/
+/orig/**
+!/orig/.gitkeep
+/assets/**
+/project.local.json
+/msvc6/
+/tools/bin/**
+!/tools/bin/.gitkeep
+__pycache__/
+*.pyc
+*.obj
+*.o
+*.pdb
