@@ -15,9 +15,10 @@ include/                  headers
 orig/                     local executable, not committed
 notes/                    scores
 docs/walkthrough.md       the steps, in order
+install.bat               one step: tools, executable, SHA1, Binary Ninja installer
 tools/setup.py            downloads Ninja, objdiff, decomp-toolkit, Binary Ninja Free, MSVC 6
 tools/find_game.py        copies the executable out of Steam or GOG
 .github/workflows/        empty until a split builds
 ```
 
-`python tools/setup.py` then `python tools/find_game.py`. Fill `config/project.json` first.
+Double-click `install.bat`. It asks for the executable and where the game is installed, downloads the tools, copies the executable into `orig/`, and records the SHA1. The steps after that are in [docs/walkthrough.md](docs/walkthrough.md).

@@ -78,9 +78,8 @@ def main():
     print("")
     print("Tools are in tools/bin. Ninja is on the Python Scripts directory.")
     print("MSVC 6 cl.exe is msvc6/VC98/Bin/cl.exe when the clone finishes.")
-    print("Binary Ninja Free is non-commercial. Run the installer:")
+    print("Binary Ninja Free is non-commercial. The installer is:")
     print("  %s" % installer)
-    print("Then fill config/project.json and run: python tools/find_game.py")
 
 
 if __name__ == "__main__":

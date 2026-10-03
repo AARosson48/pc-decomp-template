@@ -205,6 +205,7 @@ def main():
     if not pinned:
         print("Pin that sha1 in config/project.json when this is the build you are matching.")
     print("game_dir saved to project.local.json")
+    return dest, digest
 
 
 if __name__ == "__main__":
