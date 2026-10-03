@@ -1,6 +1,5 @@
 @echo off
 cd /d "%~dp0"
-py -3 install.py
-if errorlevel 1 python install.py
-echo.
-pause
+pyw -3 builder_app.py
+if errorlevel 1 py -3 builder_app.py
+if errorlevel 1 python builder_app.py

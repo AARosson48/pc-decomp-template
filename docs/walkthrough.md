@@ -13,7 +13,7 @@ include/                  headers
 orig/                     the executable, copied from Steam or GOG, not committed
 notes/                    what you compiled and what objdiff scored
 docs/                     this walkthrough
-install.bat               asks for the game, then runs the two scripts below
+install.bat               opens PC Decomp Project Builder
 tools/setup.py            downloads the tools
 tools/find_game.py        finds the install and copies the executable
 tools/bin/                dtk, objdiff, and the Binary Ninja installer
@@ -23,13 +23,15 @@ build/src/                objects compiled from src/
 .github/workflows/        CI, after a split exists
 ```
 
-## 1. Run the installer
+## 1. Open the builder
 
-Python 3.10 or newer, on Windows. Git is required for the compiler clone. Double-click `install.bat` (or run `python install.py`).
+Python 3.10 or newer, on Windows. Git is required for the compiler clone. Double-click `install.bat`.
 
-It asks for the executable file name and one of: a Steam app id, a GOG game id, the folder under `steamapps/common`, or the install path. Then it downloads Ninja, Capstone, decomp-toolkit, objdiff, the Binary Ninja Free installer, and the MSVC 6 tree. It copies the executable into `orig/`, writes the SHA1 into `config/project.json` and `config/dtk.yml`, and opens the Binary Ninja installer. That edition is free for non-commercial use.
+PC Decomp Project Builder is one window. **Install tools** downloads Ninja, Capstone, decomp-toolkit, objdiff, the Binary Ninja Free installer, and the MSVC 6 tree into this builder. Those stay here and are shared by every project. Binary Ninja Free is for non-commercial use.
 
-Archives, movies, and audio stay in the Steam or GOG install. `tools/setup.py` and `tools/find_game.py` are the same two steps, if you would rather run them yourself after editing `config/project.json`.
+The list is the Steam and GOG games already installed on this PC. Pick one, check the executable, and **Create project**. That makes a new folder with `orig/`, the SHA1 in `config/dtk.yml`, and `tools.json` pointing back at this builder. Archives stay in the store install.
+
+`python install.py` asks the same questions in the console and sets up this folder instead of a new project.
 
 ## 2. Open the executable
 

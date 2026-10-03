@@ -1,6 +1,6 @@
 # PC decomp template
 
-A blank matching-decomp shell for a Windows game. The steps are in [docs/walkthrough.md](docs/walkthrough.md).
+A blank matching-decomp shell for a Windows game. Double-click `install.bat` to open PC Decomp Project Builder. The steps after a project exists are in [docs/walkthrough.md](docs/walkthrough.md).
 
 This repository is a [GitHub template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template). Use it to start a new project. It does not contain a game or decompiled source.
 
@@ -15,10 +15,11 @@ include/                  headers
 orig/                     local executable, not committed
 notes/                    scores
 docs/walkthrough.md       the steps, in order
-install.bat               one step: tools, executable, SHA1, Binary Ninja installer
+install.bat               opens PC Decomp Project Builder
+builder_app.py            the window: tools, installed games, new project
 tools/setup.py            downloads Ninja, objdiff, decomp-toolkit, Binary Ninja Free, MSVC 6
 tools/find_game.py        copies the executable out of Steam or GOG
 .github/workflows/        empty until a split builds
 ```
 
-Double-click `install.bat`. It asks for the executable and where the game is installed, downloads the tools, copies the executable into `orig/`, and records the SHA1. The steps after that are in [docs/walkthrough.md](docs/walkthrough.md).
+Double-click `install.bat`. The window lists Steam and GOG games on this PC. Install tools once, pick a game, and it creates a project folder with the executable and the SHA1 filled in. `install.py` is the same setup as a prompt, if you do not want the window.

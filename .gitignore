@@ -3,6 +3,7 @@
 !/orig/.gitkeep
 /assets/**
 /project.local.json
+/tools.json
 /msvc6/
 /tools/bin/**
 !/tools/bin/.gitkeep
