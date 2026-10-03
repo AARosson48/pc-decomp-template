@@ -1,5 +1,7 @@
 # PC decomp template
 
+**Work in progress.** The builder and the local workbench run, and the matching flow is still changing.
+
 A blank matching-decomp shell for a Windows game. Double-click `install.bat` to open PC Decomp Project Builder. The steps after a project exists are in [docs/walkthrough.md](docs/walkthrough.md).
 
 This repository is a [GitHub template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template). Use it to start a new project. It does not contain a game or decompiled source.

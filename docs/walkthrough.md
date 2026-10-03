@@ -1,5 +1,7 @@
 # Walkthrough
 
+This project is a work in progress. The steps below are the current flow, and they will change.
+
 Do these in order. Each step fills one of the folders below. `build/`, `msvc6/`, `tools/bin/`, and the executable under `orig/` are created on your machine and stay out of git.
 
 ```text
