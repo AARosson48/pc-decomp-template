@@ -58,7 +58,7 @@ TOOLS = [
     },
     {
         "name": "build_report",
-        "description": "Write objdiff.json and build/report.json for the project.",
+        "description": "Write the objdiff report from units already compiled into build/report.",
         "inputSchema": {"type": "object", "properties": {}},
     },
 ]

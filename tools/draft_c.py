@@ -34,7 +34,11 @@ def draft(addr, pseudo):
     if "{" not in text or text.startswith("Ghidra"):
         return ""
     text = _TYPE_RE.sub(lambda match: _TYPE_MAP[match.group(0)], text)
-    text = re.sub(r"\bFUN_([0-9A-Fa-f]+)\b", lambda match: "_fn_%08X" % int(match.group(1), 16), text)
+    text = re.sub(
+        r"\b(?:FUN|Unwind)_([0-9A-Fa-f]+)\b",
+        lambda match: "_fn_%08X" % int(match.group(1), 16),
+        text,
+    )
     name = "_fn_%08X" % addr
     found = re.search(r"(?m)^([^\n{]+?)\s+(_fn_[0-9A-Fa-f]+)\s*\(([^)]*)\)", text)
     if not found:
@@ -452,8 +456,55 @@ def _split_top(text):
     return args
 
 
+def _c_names(text):
+    """C++ mangling hides fn_00631190 as ?fn_00631190@@YAHXZ. Give every one C linkage."""
+    text = re.sub(
+        r"\bfn_0x([0-9A-Fa-f]+)\b",
+        lambda match: "_fn_%08X" % int(match.group(1), 16),
+        text,
+    )
+    text = re.sub(
+        r"(?<![_A-Za-z0-9])fn_([0-9A-Fa-f]{8})\b",
+        lambda match: "_fn_%s" % match.group(1).upper(),
+        text,
+    )
+    lines = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if 'extern "C"' in line or not re.search(r"\b_fn_[0-9A-Fa-f]{8}\s*\(", line):
+            lines.append(line)
+            continue
+        if re.match(r"(?:return|if|for|while|switch|do|else|case)\b", stripped):
+            lines.append(line)
+            continue
+        if stripped.startswith("extern "):
+            lines.append(line.replace("extern ", 'extern "C" ', 1))
+            continue
+        if re.match(r"\s*(?:[A-Za-z_][\w\s\*]*\s+)_fn_[0-9A-Fa-f]{8}\s*\(", line):
+            lines.append(re.sub(r"^(\s*)", r'\1extern "C" ', line, count=1))
+            continue
+        lines.append(line)
+    joined = "\n".join(lines)
+    if text.endswith("\n"):
+        joined += "\n"
+    return joined
+
+
+def _rename_block_functions(text):
+    """The split symbol is _fn_<address>. A FUN_<address> definition does not emit that symbol."""
+    pattern = re.compile(r"// FN ([0-9A-Fa-f]{8})\n(.*?)// END \1\n", re.S)
+
+    def repl(match):
+        addr = match.group(1).upper()
+        body = re.sub(r"\bFUN_%s\b" % addr, "_fn_%s" % addr, match.group(2), flags=re.I)
+        return "// FN %s\n%s// END %s\n" % (match.group(1), body, match.group(1))
+
+    return pattern.sub(repl, text)
+
+
 def _relax_file(text):
     """One prototype per function. Calls go through a cast so an int and a pointer can share it."""
+    text = _c_names(_rename_block_functions(text))
     def drafted(match):
         inner = match.group(2)
         if "Drafted from Ghidra" not in inner:
@@ -494,7 +545,7 @@ def _relax_file(text):
         block = "\n".join(lines) + "\n\n"
         at = text.find("// FN ")
         text = block + text if at < 0 else text[:at] + block + text[at:]
-    return _cast_global_stores(_declare_externs(_hoist_typedefs(text)))
+    return _collapse_typedefs(_cast_global_stores(_declare_externs(_hoist_typedefs(text))))
 
 
 def _cast_global_stores(text):
@@ -511,11 +562,26 @@ def _cast_global_stores(text):
     return re.sub(r"\b((?:DAT|PTR)_[0-9A-Fa-f]+)\s*=\s*([^;\n]+);", replace, text)
 
 
+_NOT_FUNCTIONS = {
+    "if", "for", "while", "switch", "return", "sizeof", "do", "goto", "else", "case",
+    "asm", "__asm", "int3", "nop", "ret", "jmp", "call", "near", "far",
+}
+
+
 def _declare_externs(text):
+    kept = []
+    for line in text.splitlines():
+        match = re.search(r'extern "C"[^;]*\b([A-Za-z_][A-Za-z0-9_]*)\s*\(', line)
+        if match and match.group(1) in _NOT_FUNCTIONS:
+            continue
+        kept.append(line)
+    text = "\n".join(kept)
+    if not text.endswith("\n"):
+        text += "\n"
     calls = []
     for match in re.finditer(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\s*\(", text):
         name = match.group(1)
-        if name in calls or name in ("if", "for", "while", "switch", "return", "sizeof", "do"):
+        if name in calls or name in _NOT_FUNCTIONS:
             continue
         if name.startswith("_fn_") or name.startswith("thunk_"):
             continue
@@ -527,6 +593,8 @@ def _declare_externs(text):
     lines = []
     for name in calls:
         if re.search(r'(?:extern "C"[^;\n]*|\btypedef [^;\n]*|(?:^|\n)\s*void\s+)\b%s\b' % name, text):
+            continue
+        if re.search(r"(?m)^[^\n]*\b%s\s*\([^;\n]*\)\s*;" % re.escape(name), text):
             continue
         if re.search(r"\b%s\s*\([^;]*\)\s*\{" % name, text):
             continue
@@ -588,6 +656,33 @@ def _cast_fn_calls(line):
         return "(*(int (__cdecl *)(...))%s)(" % match.group(1)
 
     return re.sub(r"(?<!\(\.\.\.\)\))(_fn_[0-9A-Fa-f]+)\s*\(", replace, line)
+
+
+def _collapse_typedefs(text):
+    """One typedef per name. `code` stays the int function type the drafts call through."""
+    name_re = re.compile(r"^typedef\s+.+\b([A-Za-z_]\w*)\s*(?:\([^;]*)?;\s*$")
+    lines = text.split("\n")
+    groups = {}
+    for index, line in enumerate(lines):
+        match = name_re.match(line.strip())
+        if match:
+            groups.setdefault(match.group(1), []).append(index)
+    drop = set()
+    for name, indexes in groups.items():
+        if len(indexes) < 2:
+            continue
+        keep = indexes[0]
+        if name == "code":
+            for index in indexes:
+                if "int __cdecl code(" in lines[index]:
+                    keep = index
+                    break
+        for index in indexes:
+            if index != keep:
+                drop.add(index)
+    if not drop:
+        return text
+    return "\n".join(line for index, line in enumerate(lines) if index not in drop)
 
 
 def _definition_signatures(text):

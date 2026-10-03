@@ -45,6 +45,11 @@ def _ask(project_root, model, addr, pseudo, cpp, assembly, compiled, score):
     try:
         raw = _complete(model, _prompt(project_root, name, pseudo, cpp, assembly, compiled, changes, score, failed), 0.2)
         split_end = _split_end(raw, addr)
+        if _lecture(raw):
+            result = {"code": "", "model": model, "diff": changes, "note": "The model explained the listing instead of returning C. The editor was left unchanged."}
+            if split_end:
+                result["split_end"] = split_end
+            return result
         code = _code(raw)
     except Exception as exc:
         return {"code": "", "note": "The local model did not answer.\n(%s)" % exc, "model": model, "diff": changes}
@@ -99,9 +104,15 @@ def _prompt(project_root, name, pseudo, cpp, assembly, compiled, changes, score,
         "Do not return the current C unchanged.",
         "Do not return a lower-scoring attempt. A draft that scored higher than the current C is not a failure. You may return that draft.",
         "Your reply is compiled as C. Do not write push, pop, mov, lea, test, cmp, call, jmp, je, jne, or ret.",
+        "Do not explain. No headings, no plan, and no paragraph before the code.",
+        "Do not write about optimization, nop padding, volatile, or inline assembly.",
+        "Do not use volatile, __asm, or a cast whose purpose is to stop the compiler from deleting code.",
         "",
         "Fix these assembly differences:",
     ]
+    compiled_rows = _insns(compiled)
+    if compiled_rows and all(row == "nop" or row.startswith("nop ") for row in compiled_rows):
+        lines.append("The compiled listing is only nop. That is padding, not this function. Ignore it and follow the source assembly.")
     padding = _padding_split(assembly)
     if padding:
         lines.append("Padding nops start at %s. Those nops are not part of this function." % padding)
@@ -157,6 +168,36 @@ def _prompt(project_root, name, pseudo, cpp, assembly, compiled, changes, score,
         for ident in seen:
             lines.append(_declare(ident, assembly))
     return "\n".join(lines)
+
+
+def clear_attempts(project_root, addr=None):
+    """Drop saved attempts. A score from the old diff is not a failed draft."""
+    path = os.path.join(project_root, "build", "ai_log.json")
+    if addr is None:
+        removed = 0
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    data = json.load(handle) or {}
+                removed = sum(len(rows) for rows in data.values() if isinstance(rows, list))
+            except (OSError, ValueError):
+                removed = 0
+            os.remove(path)
+        return {"cleared": removed, "functions": "all"}
+    name = "_fn_%08X" % int(addr)
+    data = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle) or {}
+        except (OSError, ValueError):
+            data = {}
+    rows = data.pop(name, []) or []
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    return {"cleared": len(rows), "name": name}
 
 
 def remember(project_root, addr, code, score=None, why=""):
@@ -577,6 +618,12 @@ _CODE_START = re.compile(
     r"^(?://|/\*|#|extern\b|typedef\b|struct\b|union\b|enum\b|static\b|const\b|"
     r"unsigned\b|signed\b|int\b|void\b|char\b|short\b|long\b|float\b|double\b|_fn_)"
 )
+
+
+def _lecture(text):
+    sample = (text or "").lower()
+    marks = ("optimized away", "inline assembly", "volatile", "nop padding", "the problem", "hard-coded")
+    return sum(1 for mark in marks if mark in sample) >= 2
 
 
 def _code(text):

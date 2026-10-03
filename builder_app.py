@@ -59,27 +59,11 @@ def _first_file(paths):
     return ""
 
 
-def _project_bins():
-    root = os.path.dirname(ROOT)
-    found = []
-    if not os.path.isdir(root):
-        return found
-    for entry in os.listdir(root):
-        bin_dir = os.path.join(root, entry, "tools", "bin")
-        if os.path.isdir(bin_dir):
-            found.append(bin_dir)
-    return found
-
-
 def find_tools():
-    bins = [os.path.join(ROOT, "tools", "bin")] + _project_bins()
-    dtk = _first_file([shutil.which("dtk")] + [os.path.join(path, "dtk.exe") for path in bins])
-    objdiff = _first_file(
-        [shutil.which("objdiff-cli")] + [os.path.join(path, "objdiff-cli.exe") for path in bins]
-    )
-    objdiff_gui = _first_file(
-        [shutil.which("objdiff")] + [os.path.join(path, "objdiff.exe") for path in bins]
-    )
+    bin_dir = os.path.join(ROOT, "tools", "bin")
+    dtk = _first_file([os.path.join(bin_dir, "dtk.exe")])
+    objdiff = _first_file([os.path.join(bin_dir, "objdiff-cli.exe")])
+    objdiff_gui = _first_file([os.path.join(bin_dir, "objdiff.exe")])
     msvc_roots = [
         os.environ.get("MSVC6_ROOT", ""),
         r"C:\projects\MSVC600",
@@ -92,7 +76,7 @@ def find_tools():
     ]
     binary_ninja = _first_file(
         [os.path.join(path, "Vector35", "BinaryNinja", "binaryninja.exe") for path in program_files]
-        + [os.path.join(path, "binaryninja_free_win64.exe") for path in bins]
+        + [os.path.join(bin_dir, "binaryninja_free_win64.exe")]
     )
     return {
         "dtk": dtk,

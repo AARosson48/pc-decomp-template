@@ -2,8 +2,8 @@
 """Cut a PE .text section into bank units of about 16KB.
 
 Cuts land on 4-aligned function starts: the image entry, call targets, and
-bytes that follow MSVC int 3 padding. This is the first split, before any
-original .cpp path is known.
+bytes that follow MSVC int 3 padding. A jump stays in the function above it.
+This is the first split, before any original .cpp path is known.
 """
 
 import os
@@ -77,9 +77,11 @@ def function_starts(blob, text_va):
     while index + 5 <= limit:
         opcode = blob[index]
         if opcode in (0xE8, 0xE9):
-            target = text_va + index + 5 + _i32(blob, index + 1)
-            if text_va <= target < text_va + limit and target % 4 == 0:
-                starts.add(target)
+            # E8 calls a function. E9 jumps inside the function that contains it.
+            if opcode == 0xE8:
+                target = text_va + index + 5 + _i32(blob, index + 1)
+                if text_va <= target < text_va + limit and target % 4 == 0:
+                    starts.add(target)
             index += 5
             continue
         index += 1
@@ -95,7 +97,16 @@ def function_starts(blob, text_va):
         if end > index and end < limit and start % 4 == 0:
             starts.add(start)
         index = max(end, index + 1)
-    return starts
+    # An unconditional jump is the end of the function above it, not a new one.
+    return {
+        addr for addr in starts
+        if not _starts_with_jump(blob, text_va, addr)
+    }
+
+
+def _starts_with_jump(blob, text_va, addr):
+    index = addr - text_va
+    return 0 <= index < len(blob) and blob[index] in (0xE9, 0xEB)
 
 
 def bank_ranges(text_va, text_end, starts):

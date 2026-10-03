@@ -59,17 +59,20 @@ HTML = r"""<!DOCTYPE html>
   #projstats {
     margin-left: auto;
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
     font: 12px Consolas, "Cascadia Mono", monospace;
     color: #cccccc;
     white-space: nowrap;
   }
+  .stat { display: flex; align-items: center; gap: 8px; }
+  .stat .label { width: 58px; color: #858585; }
   #projstats .meter { width: 72px; }
-  #match { font: 12px Consolas, monospace; color: #858585; }
-  #match.done, .pct.done { color: #89d185; }
+  #match, #reported { font: 12px Consolas, monospace; color: #858585; }
+  #match.done, .pct.done, #reported.done, .flag.reported { color: #89d185; }
   #match.mid, .pct.mid { color: #d7ba7d; }
-  #match.bad, .pct.bad { color: #f48771; }
+  #match.bad, .pct.bad, #reported.bad, .flag.issue { color: #f48771; }
   button {
     background: #3c3c3c;
     color: #ffffff;
@@ -132,9 +135,11 @@ HTML = r"""<!DOCTYPE html>
   #banklist button:hover { background: #2a2d2e; }
   #banklist button.on:hover { background: #094771; }
   #fns { overflow: auto; min-height: 0; }
+  .rename { display: flex; gap: 6px; }
+  .rename input { flex: 1; min-width: 0; }
   #fns button {
     display: grid;
-    grid-template-columns: 7.6em minmax(0, 1fr) 2.6em;
+    grid-template-columns: 7.2em minmax(0, 1fr) 3.2em 2.4em 4.6em;
     align-items: center;
     width: 100%;
     gap: 8px;
@@ -146,6 +151,7 @@ HTML = r"""<!DOCTYPE html>
     font: 12px Consolas, "Cascadia Mono", monospace;
     border-radius: 0;
   }
+  #fns button .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #fns button.on { background: #094771; color: #ffffff; }
   #fns button:hover { background: #2a2d2e; }
   #fns button.on:hover { background: #094771; }
@@ -162,7 +168,7 @@ HTML = r"""<!DOCTYPE html>
   .meter.bad i { background: #f14c4c; }
   .meter.mid i { background: #d7ba7d; }
   .meter.done i { background: #89d185; }
-  .pct { text-align: right; color: #858585; }
+  .pct, .flag { text-align: right; color: #858585; }
   #status { padding: 8px; color: #858585; font-size: 12px; border-top: 1px solid #2b2b2b; min-height: 32px; }
   #status.bad { color: #f48771; }
   .panes {
@@ -211,19 +217,32 @@ HTML = r"""<!DOCTYPE html>
   <div class="brand">PC Decomp</div>
   <div id="project"></div>
   <div id="projstats">
-    <span id="projbar" class="meter"><i></i></span>
-    <span id="projpct" class="pct">—</span>
-    <span id="projcount">0 complete · 0/0 scored</span>
+    <div class="stat">
+      <span class="label">Touched</span>
+      <span id="projbar" class="meter"><i></i></span>
+      <span id="projpct" class="pct">—</span>
+      <span id="projcount">0 complete · 0/0</span>
+    </div>
+    <div class="stat">
+      <span class="label">Report</span>
+      <span id="reportbar" class="meter"><i></i></span>
+      <span id="reportpct" class="pct">—</span>
+      <span id="reportcount">0 in the report</span>
+    </div>
   </div>
   <div id="fnlabel"></div>
   <div id="match">—</div>
+  <div id="reported"></div>
   <button id="draft" disabled>Draft C</button>
   <button id="pass">Ghidra pass</button>
   <button id="allpass">All banks</button>
   <button id="ask" disabled>Ask AI</button>
+  <button id="clearattempts" disabled title="Drop saved attempts for this function. A draft the old score called a miss can be tried again.">Clear attempts</button>
   <button id="save" disabled>Save</button>
-  <button id="score" class="primary" disabled>Score</button>
-  <button id="report">Report</button>
+  <button id="build" class="primary" disabled title="Write build.ninja, split the executable, and compile this unit">Build</button>
+  <button id="diff" disabled title="Compare the built object with the retail object">Diff</button>
+  <button id="report" title="Compile this bank into build/report. Diff stays in build/diff.">Report</button>
+  <button id="report100" title="Put every bank that has a 100% diff into the report.">Report 100s</button>
 </header>
 <div class="workspace">
   <aside>
@@ -238,6 +257,10 @@ HTML = r"""<!DOCTYPE html>
     <div class="side-pad" style="padding-top:0">
       <label for="find">Function</label>
       <input id="find" placeholder="Address or name" autocomplete="off">
+      <div class="rename">
+        <input id="fnname" placeholder="Function name" disabled>
+        <button id="rename" type="button" disabled title="Rename this function in the source and write the mangled symbol, then Build.">Rename</button>
+      </div>
       <div id="progress">No scores yet</div>
     </div>
     <div id="fns"></div>
@@ -353,7 +376,8 @@ function pctText(percent) {
   const n = Number(percent);
   if (n >= 100) return "100";
   if (n <= 0) return "0";
-  return n < 10 ? n.toFixed(1) : String(Math.round(n));
+  if (n >= 99.5 || n < 10) return n.toFixed(1);
+  return String(Math.round(n));
 }
 function renderFunctions() {
   const query = document.getElementById("find").value.trim().toLowerCase().replace(/^0x/, "");
@@ -362,9 +386,11 @@ function renderFunctions() {
   let shown = 0;
   let complete = 0;
   let scored = 0;
+  let reported = 0;
   functions.forEach(fn => {
     if (Number(fn.match_percent) >= 100) complete += 1;
     if (fn.match_percent != null && fn.match_percent !== "") scored += 1;
+    if (fn.report_percent != null && fn.report_percent !== "") reported += 1;
     const addr = hex(fn.addr);
     if (query && addr.toLowerCase().indexOf(query) < 0 && fn.name.toLowerCase().indexOf(query) < 0) return;
     shown += 1;
@@ -372,7 +398,11 @@ function renderFunctions() {
     button.type = "button";
     if (current && current.addr === fn.addr) button.className = "on";
     const level = tone(fn.match_percent);
-    button.title = addr + "  " + fn.size + " bytes" + (level === "none" ? "" : "  " + pctText(fn.match_percent) + "%");
+    const inReport = fn.report_percent != null && fn.report_percent !== "";
+    const issue = !inReport && Number(fn.match_percent) >= 100;
+    const touchedText = level === "none" ? "not touched" : "touched " + pctText(fn.match_percent) + "%";
+    const reportText = inReport ? "in the report at " + pctText(fn.report_percent) + "%" : (issue ? "100% but not in the report" : "not in the report");
+    button.title = addr + "  " + fn.size + " bytes  " + touchedText + "  " + reportText;
     const addrNode = document.createElement("span");
     addrNode.className = "addr";
     addrNode.textContent = addr;
@@ -386,26 +416,55 @@ function renderFunctions() {
     pct.className = "pct " + level;
     pct.textContent = pctText(fn.match_percent);
     button.appendChild(addrNode);
+    const nameNode = document.createElement("span");
+    nameNode.className = "name";
+    nameNode.textContent = fn.name || "";
+    button.appendChild(nameNode);
+    const flag = document.createElement("span");
+    flag.className = "flag" + (inReport ? " reported" : (issue ? " issue" : ""));
+    flag.textContent = inReport ? pctText(fn.report_percent) : (issue ? "missing" : "—");
     button.appendChild(meter);
     button.appendChild(pct);
+    button.appendChild(flag);
     button.addEventListener("click", () => loadFunction(fn.addr));
     list.appendChild(button);
   });
+  let missing = 0;
+  functions.forEach(fn => {
+    const inReport = fn.report_percent != null && fn.report_percent !== "";
+    if (!inReport && Number(fn.match_percent) >= 100) missing += 1;
+  });
   const progress = document.getElementById("progress");
   if (!functions.length) progress.textContent = "No functions";
-  else if (!scored) progress.textContent = functions.length + " functions · none scored";
-  else progress.textContent = complete + " complete · " + scored + " scored";
+  else progress.textContent = scored + " touched · " + reported + " in the report · " + functions.length + " functions";
+  if (missing) progress.textContent += " · " + missing + " at 100% not in the report";
   if (query) progress.textContent += " · " + shown + " shown";
 }
-function setMatch(percent) {
+function setMatch(percent, reportPercent) {
   const node = document.getElementById("match");
-  if (percent == null || percent === "") {
+  const flag = document.getElementById("reported");
+  const inReport = reportPercent != null && reportPercent !== "";
+  const touched = percent != null && percent !== "";
+  if (!touched) {
     node.textContent = "—";
     node.className = "";
-    return;
+  } else {
+    node.textContent = pctText(percent) + "%";
+    node.className = tone(percent);
   }
-  node.textContent = pctText(percent) + "%";
-  node.className = tone(percent);
+  if (inReport) {
+    flag.textContent = "reported " + pctText(reportPercent) + "%";
+    flag.className = "done";
+  } else if (touched && Number(percent) >= 100) {
+    flag.textContent = "not reported";
+    flag.className = "bad";
+  } else if (touched) {
+    flag.textContent = "not reported";
+    flag.className = "";
+  } else {
+    flag.textContent = "";
+    flag.className = "";
+  }
 }
 let bankRows = [];
 function bankCells(item) {
@@ -439,7 +498,7 @@ function paintBanks(rows) {
     row.type = "button";
     if (item.name === selected) row.className = "on";
     bankCells(item).forEach(cell => row.appendChild(cell));
-    row.title = item.scored ? item.scored + "/" + item.functions + " scored, " + item.complete + " complete" : item.functions + " functions, none scored";
+    row.title = (item.scored || 0) + " touched · " + (item.reported || 0) + " in the report · " + item.functions + " functions";
     row.addEventListener("click", () => {
       select.value = item.name;
       list.hidden = true;
@@ -455,29 +514,40 @@ function paintBanks(rows) {
   button.innerHTML = "";
   if (current) {
     bankCells(current).forEach(cell => button.appendChild(cell));
-    button.title = current.scored ? current.scored + "/" + current.functions + " scored" : "No scores yet";
+    button.title = (current.scored || 0) + " touched · " + (current.reported || 0) + " in the report · " + current.functions + " functions";
   }
+}
+function paintMeter(barId, pctId, countId, average, countText) {
+  const level = average == null ? "none" : tone(average);
+  const bar = document.getElementById(barId);
+  bar.className = "meter " + level;
+  bar.firstElementChild.style.width = (average == null ? 0 : Math.max(0, Math.min(100, average))) + "%";
+  const pct = document.getElementById(pctId);
+  pct.className = "pct " + level;
+  pct.textContent = average == null ? "—" : pctText(average) + "%";
+  document.getElementById(countId).textContent = countText;
 }
 function paintProject(rows) {
   let total = 0;
   let scored = 0;
   let complete = 0;
   let sum = 0;
+  let reported = 0;
+  let reportComplete = 0;
+  let reportSum = 0;
   rows.forEach(item => {
     total += item.functions || 0;
     scored += item.scored || 0;
     complete += item.complete || 0;
+    reported += item.reported || 0;
+    reportComplete += item.report_complete || 0;
     if (item.scored && item.match_percent != null) sum += Number(item.match_percent) * item.scored;
+    if (item.reported && item.report_percent != null) reportSum += Number(item.report_percent) * item.reported;
   });
   const average = total ? sum / total : null;
-  const level = average == null ? "none" : tone(average);
-  const bar = document.getElementById("projbar");
-  bar.className = "meter " + level;
-  bar.firstElementChild.style.width = (average == null ? 0 : Math.max(0, Math.min(100, average))) + "%";
-  const pct = document.getElementById("projpct");
-  pct.className = "pct " + level;
-  pct.textContent = average == null ? "—" : pctText(average) + "%";
-  document.getElementById("projcount").textContent = complete + " complete · " + scored + "/" + total + " scored";
+  const reportAverage = total ? reportSum / total : null;
+  paintMeter("projbar", "projpct", "projcount", average, complete + " complete · " + scored + "/" + total);
+  paintMeter("reportbar", "reportpct", "reportcount", reported ? reportAverage : null, reportComplete + " complete · " + reported + "/" + total);
 }
 document.getElementById("bankbtn").addEventListener("click", event => {
   event.stopPropagation();
@@ -531,10 +601,12 @@ function showPseudo(token, addr, text) {
 async function loadFunction(addr) {
   const token = ++loadToken;
   setStatus("Loading " + hex(addr));
-  document.getElementById("score").disabled = true;
+  document.getElementById("build").disabled = true;
+  document.getElementById("diff").disabled = true;
   document.getElementById("save").disabled = true;
   document.getElementById("draft").disabled = true;
   document.getElementById("ask").disabled = true;
+  document.getElementById("clearattempts").disabled = true;
   const data = await api("/api/function?addr=" + addr);
   if (token !== loadToken) return;
   current = data;
@@ -543,13 +615,18 @@ async function loadFunction(addr) {
   document.getElementById("cpp").value = saved;
   document.querySelector("#cpp").closest("section").querySelector("h2 span").textContent = "your match source";
   document.getElementById("fnlabel").textContent = hex(data.addr) + "   " + data.size + " bytes";
+  document.getElementById("fnname").value = data.name || "";
+  document.getElementById("fnname").disabled = false;
+  document.getElementById("rename").disabled = false;
   const listed = functions.find(fn => fn.addr === data.addr);
-  setMatch(listed ? listed.match_percent : null);
+  setMatch(listed ? listed.match_percent : null, listed ? listed.report_percent : null);
   document.getElementById("save").textContent = "Save";
   document.getElementById("save").disabled = false;
-  document.getElementById("score").disabled = false;
+  document.getElementById("build").disabled = false;
+  document.getElementById("diff").disabled = false;
   document.getElementById("draft").disabled = false;
   document.getElementById("ask").disabled = false;
+  document.getElementById("clearattempts").disabled = false;
   syncCpp();
   setAsm("asm", data.assembly);
   setPlain("srcasm", data.source_assembly, true);
@@ -565,6 +642,32 @@ async function loadFunction(addr) {
   } catch (err) {
     if (token !== loadToken) return;
     setPlain("pseudo", err.message, true);
+  }
+}
+async function renameFunction() {
+  if (!current) return;
+  const name = document.getElementById("fnname").value.trim();
+  const button = document.getElementById("rename");
+  button.disabled = true;
+  setStatus("Renaming " + hex(current.addr));
+  try {
+    if (document.getElementById("cpp").value !== saved) await saveCode();
+    const data = await api("/api/rename", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({addr: current.addr, name: name}),
+    });
+    saved = data.cpp == null ? saved : data.cpp;
+    cppOwner = "load";
+    document.getElementById("cpp").value = saved;
+    syncCpp();
+    document.getElementById("fnname").value = data.name || name;
+    const bank = document.getElementById("bank").value;
+    functions = await api("/api/functions?bank=" + encodeURIComponent(bank));
+    renderFunctions();
+    setStatus("Renamed to " + (data.name || name) + ". Symbol is " + (data.symbol || "") + ". Build compiles this name.");
+  } finally {
+    button.disabled = !current;
   }
 }
 async function saveCode() {
@@ -592,27 +695,118 @@ async function saveCode() {
     }, 1500);
   }
 }
-async function scoreCode() {
-  if (!current) return;
-  document.getElementById("score").disabled = true;
-  setStatus("Compiling");
-  try {
-    const data = await api("/api/score", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({addr: current.addr, code: document.getElementById("cpp").value}),
-    });
-    saved = document.getElementById("cpp").value;
+function paneNote(id, text) {
+  document.querySelector("#" + id).closest("section").querySelector("h2 span").textContent = text;
+}
+function jobButtons(disabled) {
+  document.getElementById("build").disabled = disabled || !current;
+  document.getElementById("diff").disabled = disabled || !current;
+  document.getElementById("report").disabled = disabled;
+  document.getElementById("report100").disabled = disabled;
+  document.getElementById("rename").disabled = disabled || !current;
+  document.getElementById("save").disabled = disabled || !current;
+}
+async function pollJob() {
+  const data = await api("/api/job");
+  if (data.running) {
+    document.getElementById("progress").textContent = data.note || data.phase || "";
+    setStatus(data.note || data.phase || "");
+    setTimeout(() => pollJob().catch(err => setStatus(err.message, true)), 800);
+    return;
+  }
+  jobButtons(false);
+  const result = data.result || {};
+  if (result.cpp != null && current) {
+    saved = result.cpp;
+    cppOwner = "load";
+    document.getElementById("cpp").value = saved;
+    syncCpp();
     document.getElementById("save").textContent = "Save";
-    setAsm("srcasm", data.source_assembly || data.note || "");
-    const row = functions.find(fn => fn.addr === current.addr);
-    if (row) row.match_percent = data.match_percent;
-    setMatch(data.match_percent);
+  }
+  if (data.error) {
+    setPlain("srcasm", data.error, true);
+    paneNote("srcasm", data.kind === "report" ? "report failed" : "build failed");
+    document.getElementById("report").textContent = "Report";
+    document.getElementById("report100").textContent = "Report 100s";
+    document.getElementById("progress").textContent = data.note || "Failed";
+    setStatus(data.note || "Failed", true);
+    return;
+  }
+  if (data.kind === "build") {
+    document.getElementById("save").textContent = "Save";
+    paneNote("srcasm", "from this build");
+    setAsm("srcasm", result.source_assembly || "");
+    document.getElementById("progress").textContent = data.note || "Built";
+    setStatus(data.note || "Built. Diff compares it to the retail object.");
+    return;
+  }
+  if (data.kind === "report") {
+    const name = document.getElementById("bank").value;
+    functions = await api("/api/functions?bank=" + encodeURIComponent(name));
     renderFunctions();
     refreshBanks().catch(() => {});
-    setStatus(data.note || (data.match_percent == null ? "No score" : pctText(data.match_percent) + "%"));
+    const listed = current && functions.find(fn => fn.addr === current.addr);
+    if (listed) setMatch(listed.match_percent, listed.report_percent);
+    const complete = result.complete_functions == null ? 0 : result.complete_functions;
+    const partial = result.partial_functions == null ? 0 : result.partial_functions;
+    const scored = result.scored_functions == null ? 0 : result.scored_functions;
+    document.getElementById("report").textContent = "Reported";
+    if (result.hundreds) document.getElementById("report100").textContent = "Reported";
+    document.getElementById("progress").textContent = complete + " complete · " + partial + " partial · " + scored + " scored";
+    setStatus(result.note || data.note || "Report written.");
+    setTimeout(() => {
+      if (document.getElementById("report").textContent === "Reported") {
+        document.getElementById("report").textContent = "Report";
+      }
+      if (document.getElementById("report100").textContent === "Reported") {
+        document.getElementById("report100").textContent = "Report 100s";
+      }
+    }, 1500);
+  }
+}
+async function buildCode() {
+  if (!current) return;
+  jobButtons(true);
+  document.getElementById("progress").textContent = "Saving the function";
+  setStatus("Saving the function");
+  await api("/api/build", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({addr: current.addr, code: document.getElementById("cpp").value}),
+  });
+  pollJob().catch(err => {
+    jobButtons(false);
+    setStatus(err.message, true);
+  });
+}
+async function diffCode() {
+  if (!current) return;
+  jobButtons(true);
+  setStatus("Diffing");
+  document.getElementById("progress").textContent = "Diffing " + hex(current.addr);
+  try {
+    const data = await api("/api/diff", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({addr: current.addr}),
+    });
+    const row = functions.find(fn => fn.addr === current.addr);
+    const reported = row ? row.report_percent : null;
+    if (data.state === "match") {
+      paneNote("srcasm", "bytes match");
+      setAsm("srcasm", data.source_assembly || "");
+      setMatch(100, reported);
+    } else {
+      paneNote("srcasm", "objdiff");
+      setPlain("srcasm", data.diff || data.note || "", true);
+      setMatch(data.match_percent, reported);
+    }
+    if (row) row.match_percent = data.match_percent;
+    renderFunctions();
+    setStatus(data.note || "Diff finished.", data.state !== "match");
+    document.getElementById("progress").textContent = data.note || "Diff finished.";
   } finally {
-    document.getElementById("score").disabled = false;
+    jobButtons(false);
   }
 }
 document.getElementById("bank").addEventListener("change", () => {
@@ -654,6 +848,20 @@ async function applyDraft(token, pseudo, force) {
   noteCpp("drafted from Ghidra");
   setStatus("Drafted C from Ghidra. Save, then Score.");
 }
+document.getElementById("clearattempts").addEventListener("click", () => {
+  if (!current) return;
+  const button = document.getElementById("clearattempts");
+  button.disabled = true;
+  api("/api/clear-attempts", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({addr: current.addr}),
+  }).then(data => {
+    const count = data.cleared || 0;
+    setStatus(count ? "Cleared " + count + " attempts. Diff this function again before treating an old score as a miss." : "No saved attempts for this function.");
+  }).catch(err => setStatus(err.message, true))
+    .finally(() => { button.disabled = false; });
+});
 document.getElementById("ask").addEventListener("click", () => {
   if (!current) return;
   const token = loadToken;
@@ -684,7 +892,7 @@ document.getElementById("ask").addEventListener("click", () => {
       }
       document.getElementById("fnlabel").textContent = hex(current.addr) + "   " + data.size + " bytes";
       renderFunctions();
-      setMatch(null);
+      setMatch(null, null);
     }
     if (data.assembly) setAsm("asm", data.assembly);
     if (data.pseudo) showPseudo(token, current.addr, data.pseudo);
@@ -767,7 +975,7 @@ async function pollPass(name) {
     functions = await api("/api/functions?bank=" + encodeURIComponent(open));
     renderFunctions();
     const listed = current && functions.find(fn => fn.addr === current.addr);
-    if (listed) setMatch(listed.match_percent);
+    if (listed) setMatch(listed.match_percent, listed.report_percent);
   }
   refreshBanks().catch(() => {});
   const status = data.error && data.note ? data.note + " " + data.error : (data.error || data.note || "Ghidra pass finished.");
@@ -780,39 +988,65 @@ document.getElementById("draft").addEventListener("click", () => {
   applyDraft(token, document.getElementById("pseudo").textContent, true).catch(err => setStatus(err.message, true));
 });
 document.getElementById("save").addEventListener("click", () => saveCode().catch(err => setStatus(err.message, true)));
-document.getElementById("score").addEventListener("click", () => scoreCode().catch(err => {
+document.getElementById("rename").addEventListener("click", () => renameFunction().catch(err => setStatus(err.message, true)));
+document.getElementById("build").addEventListener("click", () => buildCode().catch(err => {
+  jobButtons(false);
   setPlain("srcasm", err.message, true);
+  paneNote("srcasm", "build failed");
   setStatus(err.message, true);
-  document.getElementById("score").disabled = false;
 }));
+document.getElementById("diff").addEventListener("click", () => diffCode().catch(err => {
+  jobButtons(false);
+  setPlain("srcasm", err.message, true);
+  paneNote("srcasm", "diff failed");
+  setStatus(err.message, true);
+}));
+document.getElementById("report100").addEventListener("click", async () => {
+  const button = document.getElementById("report100");
+  button.textContent = "Reporting";
+  jobButtons(true);
+  document.getElementById("progress").textContent = "Finding banks with a 100% diff";
+  setStatus("Finding banks with a 100% diff");
+  try {
+    await api("/api/report", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({hundreds: true}),
+    });
+    pollJob().catch(err => {
+      jobButtons(false);
+      button.textContent = "Report 100s";
+      setStatus(err.message, true);
+    });
+  } catch (err) {
+    jobButtons(false);
+    button.textContent = "Report 100s";
+    document.getElementById("progress").textContent = "Report failed";
+    setStatus(err.message, true);
+  }
+});
 document.getElementById("report").addEventListener("click", async () => {
   const button = document.getElementById("report");
-  button.disabled = true;
   button.textContent = "Reporting";
-  document.getElementById("progress").textContent = "Building report";
-  setStatus("Building report");
+  jobButtons(true);
+  document.getElementById("progress").textContent = "Compiling this bank for the report";
+  setStatus("Compiling this bank for the report");
   try {
-    const data = await api("/api/report", {method: "POST"});
-    const name = document.getElementById("bank").value;
-    functions = await api("/api/functions?bank=" + encodeURIComponent(name));
-    renderFunctions();
-    refreshBanks().catch(() => {});
-    const listed = current && functions.find(fn => fn.addr === current.addr);
-    if (listed) setMatch(listed.match_percent);
-    const complete = data.complete_functions == null ? 0 : data.complete_functions;
-    const scored = data.scored_functions == null ? 0 : data.scored_functions;
-    button.textContent = "Reported";
-    document.getElementById("progress").textContent = complete + " complete · " + scored + " scored";
-    setStatus("Report written. " + complete + " complete, " + scored + " scored.");
+    await api("/api/report", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({bank: document.getElementById("bank").value}),
+    });
+    pollJob().catch(err => {
+      jobButtons(false);
+      button.textContent = "Report";
+      setStatus(err.message, true);
+    });
   } catch (err) {
+    jobButtons(false);
     button.textContent = "Report";
     document.getElementById("progress").textContent = "Report failed";
     setStatus(err.message, true);
-  } finally {
-    button.disabled = false;
-    setTimeout(() => {
-      if (button.textContent === "Reported") button.textContent = "Report";
-    }, 1500);
   }
 });
 document.addEventListener("keydown", event => {
@@ -822,7 +1056,7 @@ document.addEventListener("keydown", event => {
     saveCode().catch(err => setStatus(err.message, true));
   } else if (event.key === "Enter") {
     event.preventDefault();
-    scoreCode().catch(err => setStatus(err.message, true));
+    buildCode().catch(err => setStatus(err.message, true));
   }
 });
 if (!project) {
@@ -902,6 +1136,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"text": proj.pseudo_c(addr)})
             elif parsed.path == "/api/ghidra-pass":
                 self._json(proj.ghidra_pass_status())
+            elif parsed.path == "/api/job":
+                self._json(proj.job_status())
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as exc:
@@ -920,24 +1156,41 @@ class Handler(BaseHTTPRequestHandler):
                 row = next(item for item in proj.functions(bank["name"]) if item["addr"] == addr)
                 path = proj.save_cpp(bank["name"], addr, row["size"], body.get("code") or "")
                 self._json({"path": path})
+            elif parsed.path == "/api/rename":
+                addr = int(body["addr"])
+                bank = workspace.bank_of(proj, addr)
+                row = next(item for item in proj.functions(bank["name"]) if item["addr"] == addr)
+                self._json(proj.refactor_function(addr, body.get("name") or "", row["size"]))
+            elif parsed.path == "/api/build":
+                addr = int(body["addr"])
+                bank = workspace.bank_of(proj, addr)
+                row = next(item for item in proj.functions(bank["name"]) if item["addr"] == addr)
+                self._json(proj.start_build(bank["name"], addr, row["size"], body.get("code") or ""))
+            elif parsed.path == "/api/diff":
+                addr = int(body["addr"])
+                bank = workspace.bank_of(proj, addr)
+                self._json(proj.diff_function(bank["name"], addr))
             elif parsed.path == "/api/score":
                 addr = int(body["addr"])
                 bank = workspace.bank_of(proj, addr)
                 row = next(item for item in proj.functions(bank["name"]) if item["addr"] == addr)
                 code = body.get("code") or ""
-                proj.save_cpp(bank["name"], addr, row["size"], code)
-                try:
-                    result = proj.score(bank["name"], addr, row["size"])
-                except Exception as exc:
-                    import local_ai
-                    local_ai.remember(proj.root, addr, code, None, str(exc))
-                    raise
-                import local_ai
-                local_ai.remember(proj.root, addr, code, result.get("match_percent"), result.get("note") or "")
+                if code:
+                    proj.save_cpp(bank["name"], addr, row["size"], code)
+                result = proj.score(bank["name"], addr, row["size"])
                 self._json(result)
             elif parsed.path == "/api/draft":
                 addr = int(body["addr"])
                 self._json(proj.draft_cpp(addr, body.get("pseudo") or ""))
+            elif parsed.path == "/api/clear-attempts":
+                import local_ai
+                if body.get("all"):
+                    self._json(local_ai.clear_attempts(proj.root))
+                    return
+                if body.get("addr") is None:
+                    self._json({"error": "missing addr"}, 400)
+                    return
+                self._json(local_ai.clear_attempts(proj.root, int(body["addr"])))
             elif parsed.path == "/api/ask":
                 import local_ai
                 addr = int(body["addr"])
@@ -969,7 +1222,14 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 self._json(proj.start_ghidra_pass(bank))
             elif parsed.path == "/api/report":
-                self._json(proj.build_report())
+                if body.get("hundreds"):
+                    self._json(proj.start_report_hundreds())
+                    return
+                bank = body.get("bank") or ""
+                if not bank:
+                    self._json({"error": "missing bank"}, 400)
+                    return
+                self._json(proj.start_report(bank))
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as exc:
