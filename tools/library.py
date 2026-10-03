@@ -22,6 +22,8 @@ SKIP_EXE = (
     "vc_redist",
     "dxsetup",
     "installscript",
+    "dgvoodoo",
+    "voodoo",
 )
 
 
@@ -102,15 +104,23 @@ def exes_in(directory):
     return found
 
 
-def _prefer_exe(names, folder_name):
+def _prefer_exe(names, folder_name, directory):
     if not names:
         return ""
-    stem = folder_name.lower().replace(" ", "")
+    stem = folder_name.lower().replace(" ", "").replace("-", "")
     for name in names:
         base = os.path.basename(name.replace("/", os.sep))
         if os.path.splitext(base)[0].lower().replace(" ", "") == stem:
             return name
-    return names[0]
+
+    def size(name):
+        path = os.path.join(directory, name.replace("/", os.sep))
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+
+    return max(names, key=size)
 
 
 def exes_near(directory):
@@ -169,7 +179,7 @@ def steam_games():
                 "gog_id": "",
                 "folder": installdir.group(1),
                 "exes": names,
-                "exe": _prefer_exe(names, installdir.group(1)),
+                "exe": _prefer_exe(names, installdir.group(1), directory),
             })
     return games
 
@@ -215,7 +225,7 @@ def gog_games():
                     "gog_id": subname,
                     "folder": folder,
                     "exes": names,
-                    "exe": _prefer_exe(names, folder),
+                    "exe": _prefer_exe(names, folder, directory),
                 })
         finally:
             winreg.CloseKey(key)

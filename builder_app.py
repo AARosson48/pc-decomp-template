@@ -14,7 +14,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -47,16 +47,55 @@ SKELETON = (
 )
 
 
-def tool_status():
-    cl = os.path.join(ROOT, "msvc6", "VC98", "Bin", "cl.exe")
-    checks = (
-        ("dtk", os.path.join(ROOT, "tools", "bin", "dtk.exe")),
-        ("objdiff", os.path.join(ROOT, "tools", "bin", "objdiff-cli.exe")),
-        ("MSVC 6", cl),
-        ("Binary Ninja Free", os.path.join(ROOT, "tools", "bin", "binaryninja_free_win64.exe")),
+def _first_file(paths):
+    for path in paths:
+        if path and os.path.isfile(path):
+            return path
+    return ""
+
+
+def _project_bins():
+    root = os.path.dirname(ROOT)
+    found = []
+    if not os.path.isdir(root):
+        return found
+    for entry in os.listdir(root):
+        bin_dir = os.path.join(root, entry, "tools", "bin")
+        if os.path.isdir(bin_dir):
+            found.append(bin_dir)
+    return found
+
+
+def find_tools():
+    bins = [os.path.join(ROOT, "tools", "bin")] + _project_bins()
+    dtk = _first_file([shutil.which("dtk")] + [os.path.join(path, "dtk.exe") for path in bins])
+    objdiff = _first_file(
+        [shutil.which("objdiff-cli")] + [os.path.join(path, "objdiff-cli.exe") for path in bins]
     )
-    ready = [name for name, path in checks if os.path.isfile(path)]
-    return ready, [name for name, _ in checks]
+    objdiff_gui = _first_file(
+        [shutil.which("objdiff")] + [os.path.join(path, "objdiff.exe") for path in bins]
+    )
+    msvc_roots = [
+        os.environ.get("MSVC6_ROOT", ""),
+        r"C:\projects\MSVC600",
+        os.path.join(ROOT, "msvc6"),
+    ]
+    cl = _first_file([os.path.join(path, "VC98", "Bin", "cl.exe") for path in msvc_roots if path])
+    program_files = [
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+    ]
+    binary_ninja = _first_file(
+        [os.path.join(path, "Vector35", "BinaryNinja", "binaryninja.exe") for path in program_files]
+        + [os.path.join(path, "binaryninja_free_win64.exe") for path in bins]
+    )
+    return {
+        "dtk": dtk,
+        "objdiff": objdiff,
+        "objdiff_gui": objdiff_gui,
+        "msvc": cl,
+        "binary_ninja": binary_ninja,
+    }
 
 
 def slug(name):
@@ -117,15 +156,40 @@ def write_readme(dest, game, exe_name, digest):
         handle.write("Open the executable in Binary Ninja, then follow `docs/walkthrough.md` from step 2.\n")
 
 
+def sha1_of(path):
+    import hashlib
+    digest = hashlib.sha1()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def copy_chosen_exe(dest, exe_path):
+    orig = os.path.join(dest, "orig")
+    os.makedirs(orig, exist_ok=True)
+    for name in os.listdir(orig):
+        if name.lower().endswith(".exe"):
+            os.remove(os.path.join(orig, name))
+    target = os.path.join(orig, os.path.basename(exe_path))
+    shutil.copy2(exe_path, target)
+    digest = sha1_of(target)
+    with open(os.path.join(dest, "project.local.json"), "w", encoding="utf-8", newline="\n") as handle:
+        json.dump({"game_dir": os.path.dirname(exe_path), "exe": target, "sha1": digest}, handle, indent=2)
+        handle.write("\n")
+    return digest
+
+
 def write_tools_json(dest):
-    bin_dir = os.path.join(ROOT, "tools", "bin")
+    found = find_tools()
+    msvc_root = os.path.dirname(os.path.dirname(os.path.dirname(found["msvc"]))) if found["msvc"] else ""
     data = {
         "builder": ROOT,
-        "dtk": os.path.join(bin_dir, "dtk.exe"),
-        "objdiff_cli": os.path.join(bin_dir, "objdiff-cli.exe"),
-        "objdiff_gui": os.path.join(bin_dir, "objdiff.exe"),
-        "msvc_root": os.path.join(ROOT, "msvc6"),
-        "binary_ninja_installer": os.path.join(bin_dir, "binaryninja_free_win64.exe"),
+        "dtk": found["dtk"],
+        "objdiff_cli": found["objdiff"],
+        "objdiff_gui": found["objdiff_gui"],
+        "msvc_root": msvc_root,
+        "binary_ninja": found["binary_ninja"],
     }
     with open(os.path.join(dest, "tools.json"), "w", encoding="utf-8", newline="\n") as handle:
         json.dump(data, handle, indent=2)
@@ -183,8 +247,11 @@ class Builder(tk.Tk):
         right = tk.Frame(body, bg=BG, width=280)
         right.pack(side="right", fill="y", padx=(16, 0))
         tk.Label(right, text="Executable", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w")
-        self.exe_pick = ttk.Combobox(right, state="readonly")
-        self.exe_pick.pack(fill="x", pady=(4, 10))
+        exe_row = tk.Frame(right, bg=BG)
+        exe_row.pack(fill="x", pady=(4, 10))
+        self.exe_var = tk.StringVar()
+        tk.Entry(exe_row, textvariable=self.exe_var, bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat").pack(side="left", fill="x", expand=True, ipady=4)
+        tk.Button(exe_row, text="...", command=self._browse_exe, bg=PANEL, fg=TEXT, relief="flat").pack(side="right", padx=(6, 0))
         tk.Label(right, text="Project name", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w")
         self.name_var = tk.StringVar()
         tk.Entry(right, textvariable=self.name_var, bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat").pack(fill="x", ipady=4, pady=(4, 10))
@@ -223,8 +290,8 @@ class Builder(tk.Tk):
                     self.refresh_tools()
                 elif kind == "idle":
                     self.busy = False
-                    self.tools_button.configure(state="normal")
                     self.create_button.configure(state="normal")
+                    self.refresh_tools()
                 elif kind == "error":
                     messagebox.showerror("PC Decomp Project Builder", payload)
         except queue.Empty:
@@ -237,14 +304,20 @@ class Builder(tk.Tk):
         self.create_button.configure(state="disabled")
 
     def refresh_tools(self):
-        ready, names = tool_status()
-        if len(ready) == len(names):
-            self.tools_label.configure(text="Tools are installed in this builder.")
-        elif ready:
-            missing = [name for name in names if name not in ready]
-            self.tools_label.configure(text="Still needed: %s" % ", ".join(missing))
+        found = find_tools()
+        labels = (
+            ("dtk", "dtk"),
+            ("objdiff", "objdiff"),
+            ("msvc", "MSVC 6"),
+            ("binary_ninja", "Binary Ninja"),
+        )
+        missing = [label for key, label in labels if not found[key]]
+        if not missing:
+            self.tools_label.configure(text="Tools found on this PC.")
+            self.tools_button.configure(text="Tools found", state="disabled")
         else:
-            self.tools_label.configure(text="Tools are not installed yet.")
+            self.tools_label.configure(text="Still needed: %s" % ", ".join(missing))
+            self.tools_button.configure(text="Install tools", state="normal")
 
     def refresh_games(self):
         self.games = library.installed_games()
@@ -264,8 +337,11 @@ class Builder(tk.Tk):
         game = self._selected()
         if not game:
             return
-        self.exe_pick["values"] = game["exes"]
-        self.exe_pick.set(game["exe"])
+        chosen = game["exe"]
+        if chosen:
+            self.exe_var.set(os.path.join(game["directory"], chosen.replace("/", os.sep)))
+        else:
+            self.exe_var.set("")
         self.name_var.set(game["name"])
         self.path_label.configure(text=game["directory"])
 
@@ -273,6 +349,15 @@ class Builder(tk.Tk):
         chosen = filedialog.askdirectory(initialdir=self.folder_var.get() or os.path.dirname(ROOT))
         if chosen:
             self.folder_var.set(chosen)
+
+    def _browse_exe(self):
+        start = self.path_label.cget("text") or self.folder_var.get() or os.path.dirname(ROOT)
+        chosen = filedialog.askopenfilename(
+            initialdir=start,
+            filetypes=(("Executable", "*.exe"), ("All files", "*.*")),
+        )
+        if chosen:
+            self.exe_var.set(chosen)
 
     def install_tools(self):
         if self.busy:
@@ -314,52 +399,33 @@ class Builder(tk.Tk):
         if not game:
             messagebox.showinfo("PC Decomp Project Builder", "Pick a game from the list.")
             return
-        exe_rel = self.exe_pick.get().strip().replace("/", os.sep)
-        if not exe_rel:
-            messagebox.showinfo("PC Decomp Project Builder", "That install has no executable in its top folder. Pick another game or check the install.")
+        exe_path = self.exe_var.get().strip()
+        if not os.path.isfile(exe_path):
+            messagebox.showinfo("PC Decomp Project Builder", "Choose the game executable. You can type the path or use ....")
             return
-        exe_name = os.path.basename(exe_rel)
-        game_dir = game["directory"]
-        nested = os.path.dirname(exe_rel)
-        if nested:
-            game_dir = os.path.join(game_dir, nested)
+        exe_name = os.path.basename(exe_path)
         parent = self.folder_var.get().strip()
         if not parent:
             messagebox.showinfo("PC Decomp Project Builder", "Choose a projects folder.")
             return
         dest = os.path.join(parent, slug(self.name_var.get() or game["name"]))
-        if os.path.exists(dest):
-            messagebox.showerror("PC Decomp Project Builder", "That folder already exists:\n%s" % dest)
-            return
+        updating = os.path.isdir(dest)
         self._busy()
-        self._log("Creating %s" % dest)
+        self._log("Updating %s" % dest if updating else "Creating %s" % dest)
 
         def work():
             try:
-                os.makedirs(dest)
-                copy_skeleton(dest)
+                os.makedirs(dest, exist_ok=True)
+                if not updating:
+                    copy_skeleton(dest)
                 write_project(dest, game, exe_name)
-                process = subprocess.Popen(
-                    [sys.executable, os.path.join(dest, "tools", "find_game.py"), "--game-dir", game_dir],
-                    cwd=dest,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
-                for line in process.stdout:
-                    self.events.put(("log", line))
-                code = process.wait()
-                if code != 0:
-                    self.events.put(("error", "Could not copy the executable. See the log."))
-                    return
-                local = os.path.join(dest, "project.local.json")
-                with open(local, "r", encoding="utf-8") as handle:
-                    saved = json.load(handle)
-                pin_hash(dest, exe_name, saved["sha1"])
+                digest = copy_chosen_exe(dest, exe_path)
+                pin_hash(dest, exe_name, digest)
                 write_tools_json(dest)
-                write_readme(dest, game, exe_name, saved["sha1"])
+                write_readme(dest, game, exe_name, digest)
                 self.events.put(("log", "Project ready at %s" % dest))
-                self.events.put(("log", "SHA1 %s" % saved["sha1"]))
+                self.events.put(("log", "Executable %s" % exe_name))
+                self.events.put(("log", "SHA1 %s" % digest))
                 os.startfile(dest)
             except Exception as exc:
                 self.events.put(("error", str(exc)))
