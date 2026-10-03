@@ -1,0 +1,10 @@
+# Fill name, object, and hash after tools/find_game.py copies the executable.
+# hash is the SHA1 that script prints. object is the file name in orig/.
+# Do not run dtk until those three match the file in orig/.
+object_base: orig
+name: Game
+object: Game.exe
+hash: "0000000000000000000000000000000000000000"
+symbols: config/dtk_symbols.txt
+splits: config/splits.txt
+linker_version: "6.0"

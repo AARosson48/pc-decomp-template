@@ -1,0 +1,3 @@
+# One symbol per line, after you know a function's start and size.
+# The leading underscore is the name MSVC emits.
+# _fn_00401000 = .text:0x00401000; // type:function size:0x20

@@ -1,0 +1,3 @@
+# Original .cpp paths, once an assert or a string in the executable names them.
+# A function goes in that file under src/. A range with no path stays a bank slice.
+# D:\projects\Game\src\example.cpp
