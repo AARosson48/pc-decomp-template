@@ -6,6 +6,7 @@ import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
+import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Function;
 
 import java.io.BufferedReader;
@@ -17,6 +18,8 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Iterator;
 
 public class DecompileServer extends GhidraScript {
 	@Override
@@ -70,6 +73,7 @@ public class DecompileServer extends GhidraScript {
 			if (!note.isEmpty()) {
 				return note;
 			}
+			decompiler.flushCache();
 			trimmed = parts[1];
 		}
 		String hex = trimmed;
@@ -113,6 +117,34 @@ public class DecompileServer extends GhidraScript {
 		int transaction = currentProgram.startTransaction("split");
 		boolean ok = false;
 		try {
+			AddressSet range = new AddressSet(start, last);
+			ArrayList entries = new ArrayList();
+			Iterator functions = currentProgram.getFunctionManager().getFunctionsOverlapping(range);
+			while (functions.hasNext()) {
+				Function other = (Function) functions.next();
+				if (!other.getEntryPoint().equals(start)) {
+					entries.add(other.getEntryPoint());
+				}
+			}
+			for (int i = 0; i < entries.size(); i++) {
+				Function other = getFunctionAt((Address) entries.get(i));
+				if (other != null) {
+					removeFunction(other);
+				}
+			}
+			Function containing = getFunctionContaining(start);
+			if (containing != null && containing.getEntryPoint().compareTo(start) < 0
+					&& containing.getBody().getMaxAddress().compareTo(start) >= 0) {
+				AddressSet kept = new AddressSet(containing.getBody());
+				kept.delete(range);
+				containing.setBody(kept);
+			}
+			Function existing = getFunctionAt(start);
+			if (existing != null) {
+				removeFunction(existing);
+			}
+			currentProgram.getListing().clearCodeUnits(start, last, false);
+			disassemble(start);
 			Function function = getFunctionAt(start);
 			if (function == null) {
 				function = createFunction(start, "_fn_" + start);
@@ -120,7 +152,13 @@ public class DecompileServer extends GhidraScript {
 			if (function == null) {
 				return "Ghidra could not create a function at " + start + ".";
 			}
-			function.setBody(new AddressSet(start, last));
+			function.setBody(range);
+			AddressSetView body = function.getBody();
+			if (body.getMinAddress() == null || !body.getMinAddress().equals(start)
+					|| body.getMaxAddress() == null || body.getMaxAddress().compareTo(last) < 0) {
+				return "Ghidra kept " + function.getEntryPoint() + " as " + body.getMinAddress() + "-"
+						+ body.getMaxAddress() + " instead of " + start + "-" + last + ".";
+			}
 			ok = true;
 			return "";
 		} catch (Exception ex) {

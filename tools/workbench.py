@@ -83,7 +83,7 @@ HTML = r"""<!DOCTYPE html>
   }
   button.primary { background: #0e639c; border-color: #0e639c; }
   button:disabled { opacity: .5; }
-  .workspace { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 0; }
+  .workspace { display: grid; grid-template-columns: 340px minmax(0, 1fr); min-height: 0; }
   aside {
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -134,20 +134,44 @@ HTML = r"""<!DOCTYPE html>
   #banklist button.on { background: #094771; }
   #banklist button:hover { background: #2a2d2e; }
   #banklist button.on:hover { background: #094771; }
-  #fns { overflow: auto; min-height: 0; }
+  .fnlist { display: flex; flex-direction: column; min-height: 0; }
+  #progress { padding: 0 10px 4px; }
+  #fns { overflow: auto; min-height: 0; flex: 1; }
   .rename { display: flex; gap: 6px; }
   .rename input { flex: 1; min-width: 0; }
-  #fns button {
+  details.tools { border-top: 1px solid #2b2b2b; padding-top: 6px; }
+  details.tools summary {
+    cursor: pointer;
+    color: #cccccc;
+    font-size: 12px;
+    list-style: none;
+  }
+  details.tools summary::-webkit-details-marker { display: none; }
+  details.tools summary::before { content: "▸  "; color: #858585; }
+  details.tools[open] summary::before { content: "▾  "; }
+  details.tools .fields { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .end-actions { display: flex; gap: 6px; }
+  .end-actions button { flex: 1; }
+  .fnhead, #fns button {
     display: grid;
-    grid-template-columns: 7.2em minmax(0, 1fr) 3.2em 2.4em 4.6em;
+    grid-template-columns: 8em minmax(36px, 1fr) 2.8em 3.4em;
     align-items: center;
-    width: 100%;
     gap: 8px;
+    width: 100%;
+  }
+  .fnhead {
+    padding: 2px 10px 4px;
+    color: #858585;
+    font-size: 10px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  #fns button {
     background: transparent;
     border: 0;
     color: #cccccc;
     text-align: left;
-    padding: 4px 10px;
+    padding: 5px 10px;
     font: 12px Consolas, "Cascadia Mono", monospace;
     border-radius: 0;
   }
@@ -194,8 +218,9 @@ HTML = r"""<!DOCTYPE html>
     background: #252526;
   }
   section h2 span { color: #858585; font-weight: 400; letter-spacing: 0; text-transform: none; }
-  .code { display: grid; grid-template-columns: 3.4em minmax(0, 1fr); min-height: 0; flex: 1; }
-  .gutter, textarea, .view {
+  .code { display: grid; grid-template-columns: 3.4em minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; flex: 1; }
+  .editor { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+  .gutter, textarea, .view, #cpp-hl {
     margin: 0;
     border: 0;
     padding: 6px 0 12px;
@@ -206,7 +231,45 @@ HTML = r"""<!DOCTYPE html>
     tab-size: 4;
   }
   .gutter { overflow: hidden; text-align: right; padding-right: 8px; color: #858585; user-select: none; }
+  #tip {
+    display: none;
+    margin: 0;
+    padding: 4px 10px;
+    background: #252526;
+    color: #cccccc;
+    border-bottom: 1px solid #3c3c3c;
+    font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
+    white-space: pre-wrap;
+  }
+  #tip.show { display: block; }
+  #tip button { margin-left: 8px; }
+  #cpp-gutter span.err { color: #f14c4c; font-weight: 700; }
+  #cpp-gutter span.warn { color: #d7ba7d; font-weight: 700; }
   textarea, .view { overflow: auto; padding-left: 10px; padding-right: 12px; resize: none; outline: none; }
+  #cpp, #cpp-hl {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 6px 12px 12px 10px;
+    overflow: auto;
+  }
+  #cpp-hl { z-index: 0; overflow: hidden; pointer-events: none; }
+  #cpp {
+    z-index: 1;
+    color: transparent;
+    caret-color: #d4d4d4;
+    -webkit-text-fill-color: transparent;
+  }
+  #cpp::selection { background: #264f78; color: transparent; }
+  .hl-kw { color: #569cd6; }
+  .hl-type { color: #4ec9b0; }
+  .hl-fn { color: #dcdcaa; }
+  .hl-str { color: #ce9178; }
+  .hl-num { color: #b5cea8; }
+  .hl-com { color: #6a9955; }
+  .hl-pre { color: #c586c0; }
   .view.notice { color: #cccccc; white-space: pre-wrap; }
   .addr { color: #858585; }
   .op { color: #dcdcaa; }
@@ -239,6 +302,7 @@ HTML = r"""<!DOCTYPE html>
   <button id="ask" disabled>Ask AI</button>
   <button id="clearattempts" disabled title="Drop saved attempts for this function. A draft the old score called a miss can be tried again.">Clear attempts</button>
   <button id="save" disabled>Save</button>
+  <button id="revert" disabled title="Put back the C from before Ask AI replaced it.">Revert</button>
   <button id="build" class="primary" disabled title="Write build.ninja, split the executable, and compile this unit">Build</button>
   <button id="diff" disabled title="Compare the built object with the retail object">Diff</button>
   <button id="report" title="Compile this bank into build/report. Diff stays in build/diff.">Report</button>
@@ -255,21 +319,43 @@ HTML = r"""<!DOCTYPE html>
       </div>
     </div>
     <div class="side-pad" style="padding-top:0">
-      <label for="find">Function</label>
-      <input id="find" placeholder="Address or name" autocomplete="off">
-      <div class="rename">
-        <input id="fnname" placeholder="Function name" disabled>
-        <button id="rename" type="button" disabled title="Rename this function in the source and write the mangled symbol, then Build.">Rename</button>
+      <input id="find" placeholder="Find address or name" autocomplete="off">
+      <details class="tools" id="fntools">
+        <summary id="fnsummary">This function</summary>
+        <div class="fields">
+          <div class="rename">
+            <input id="fnname" placeholder="Function name" disabled>
+            <button id="rename" type="button" disabled title="Rename this function in the source and write the mangled symbol, then Build.">Rename</button>
+          </div>
+          <label for="fnend">End address</label>
+          <div class="rename">
+            <input id="fnend" placeholder="End address" disabled title="Hex address. Past the current end joins the following code. Inside this function, the next function starts there.">
+            <button id="setend" type="button" disabled title="Set this function's end yourself. An address past the current end is allowed.">Set end</button>
+          </div>
+          <div class="end-actions">
+            <button id="joinprev" type="button" disabled title="Pull this function into the one above it.">Join previous</button>
+            <button id="undoend" type="button" disabled title="Put the function boundaries back to how they were before the last Set end or Join.">Undo</button>
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="fnlist">
+      <div class="fnhead" title="Diff is the last comparison with retail. Report is the score written into the report.">
+        <span>Address</span>
+        <span></span>
+        <span>Diff</span>
+        <span>Report</span>
       </div>
       <div id="progress">No scores yet</div>
+      <div id="fns"></div>
     </div>
-    <div id="fns"></div>
     <div id="status"></div>
   </aside>
   <div class="panes">
     <section>
       <h2>C/C++ Code <span>your match source</span></h2>
-      <div class="code"><pre class="gutter" id="cpp-gutter"></pre><textarea id="cpp" spellcheck="false"></textarea></div>
+      <div id="tip" hidden></div>
+      <div class="code"><pre class="gutter" id="cpp-gutter"></pre><div class="editor"><pre class="highlight" id="cpp-hl" aria-hidden="true"></pre><textarea id="cpp" spellcheck="false"></textarea></div></div>
     </section>
     <section>
       <h2>Pseudo C Code <span>Ghidra</span></h2>
@@ -295,8 +381,17 @@ document.title = projectName ? projectName + " — PC Decomp" : "PC Decomp Workb
 let functions = [];
 let current = null;
 let saved = "";
+let previousCode = null;
 let loadToken = 0;
 let cppOwner = "load";
+let restorePlace = true;
+let endUndo = false;
+let cppFileLine = 1;
+let buildErrors = [];
+let cppChecks = [];
+const fnInfo = {};
+const CPP_KW = new Set(("auto bool break case catch char class const const_cast continue default delete do double dynamic_cast else enum explicit extern false float for friend goto if inline int long mutable namespace new operator private protected public register reinterpret_cast return short signed sizeof static static_cast struct switch template this throw true try typedef typeid typename union unsigned using virtual void volatile wchar_t while __declspec __fastcall __stdcall __cdecl __inline __int8 __int16 __int32 __int64 __forceinline").split(" "));
+const CPP_TYPE = new Set(("size_t ptrdiff_t int8_t int16_t int32_t int64_t uint8_t uint16_t uint32_t uint64_t intptr_t uintptr_t").split(" "));
 
 function hex(n) {
   return Number(n).toString(16).toUpperCase().padStart(8, "0");
@@ -321,6 +416,10 @@ function lineCount(text) {
   return text.split("\n").length;
 }
 function syncGutter(view, gutter) {
+  if (view.id === "cpp") {
+    syncCppMarks();
+    return;
+  }
   const text = view.value !== undefined ? view.value : view.textContent;
   const count = lineCount(text);
   let numbers = "";
@@ -328,10 +427,375 @@ function syncGutter(view, gutter) {
   gutter.textContent = numbers;
   gutter.scrollTop = view.scrollTop;
 }
+function editorLine(fileLine) {
+  return fileLine - cppFileLine + 1;
+}
+function parseBuildErrors(log) {
+  const found = [];
+  const pattern = /^(.+?)\((\d+)\)\s*:\s*error\s+(C\d+)\s*:\s*(.*)$/;
+  (log || "").split("\n").forEach(raw => {
+    const match = pattern.exec(raw.trim());
+    if (!match) return;
+    found.push({file: match[1], line: Number(match[2]), code: match[3], detail: match[4]});
+  });
+  return found;
+}
+function wordAt(text, index) {
+  let start = index;
+  let end = index;
+  while (start > 0 && /[_A-Za-z0-9]/.test(text.charAt(start - 1))) start -= 1;
+  while (end < text.length && /[_A-Za-z0-9]/.test(text.charAt(end))) end += 1;
+  return text.slice(start, end);
+}
+function lookupFn(word) {
+  const match = /^(?:_fn_|fn_)([0-9A-Fa-f]{8})$/i.exec(word || "");
+  if (!match) return null;
+  const addr = parseInt(match[1], 16);
+  const local = functions.find(fn => fn.addr === addr);
+  if (local) return local;
+  if (fnInfo[addr]) return fnInfo[addr];
+  fnInfo[addr] = {addr: addr, name: "_fn_" + hex(addr), loading: true};
+  api("/api/fn?addr=" + addr).then(row => {
+    fnInfo[addr] = row;
+    showCaretTip();
+  }).catch(() => {
+    fnInfo[addr] = {addr: addr, name: "_fn_" + hex(addr), missing: true};
+    showCaretTip();
+  });
+  return fnInfo[addr];
+}
+function paintCpp(text) {
+  const src = text || "";
+  let html = "";
+  let i = 0;
+  let bol = true;
+  while (i < src.length) {
+    const c = src.charAt(i);
+    const n = src.charAt(i + 1);
+    if (c === "\n") { html += "\n"; i += 1; bol = true; continue; }
+    if (c === " " || c === "\t") { html += c; i += 1; continue; }
+    if (c === "\r") { i += 1; continue; }
+    if (c === "/" && n === "/") {
+      let j = i + 2;
+      while (j < src.length && src.charAt(j) !== "\n") j += 1;
+      html += '<span class="hl-com">' + esc(src.slice(i, j)) + "</span>";
+      i = j;
+      bol = false;
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      let j = i + 2;
+      while (j < src.length && !(src.charAt(j) === "*" && src.charAt(j + 1) === "/")) j += 1;
+      if (j < src.length) j += 2;
+      html += '<span class="hl-com">' + esc(src.slice(i, j)) + "</span>";
+      i = j;
+      bol = false;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const quote = c;
+      let j = i + 1;
+      while (j < src.length && src.charAt(j) !== "\n") {
+        if (src.charAt(j) === "\\") { j += 2; continue; }
+        if (src.charAt(j) === quote) { j += 1; break; }
+        j += 1;
+      }
+      html += '<span class="hl-str">' + esc(src.slice(i, j)) + "</span>";
+      i = j;
+      bol = false;
+      continue;
+    }
+    if (c === "#" && bol) {
+      let j = i + 1;
+      while (j < src.length && /[A-Za-z_]/.test(src.charAt(j))) j += 1;
+      html += '<span class="hl-pre">' + esc(src.slice(i, j)) + "</span>";
+      i = j;
+      bol = false;
+      continue;
+    }
+    if (/[0-9]/.test(c) || (c === "." && /[0-9]/.test(n))) {
+      let j = i;
+      if (src.slice(i, i + 2).toLowerCase() === "0x") {
+        j += 2;
+        while (j < src.length && /[0-9A-Fa-f]/.test(src.charAt(j))) j += 1;
+      } else {
+        while (j < src.length && /[0-9.]/.test(src.charAt(j))) j += 1;
+      }
+      while (j < src.length && /[uUlLfF]/.test(src.charAt(j))) j += 1;
+      html += '<span class="hl-num">' + esc(src.slice(i, j)) + "</span>";
+      i = j;
+      bol = false;
+      continue;
+    }
+    if (/[_A-Za-z]/.test(c)) {
+      let j = i + 1;
+      while (j < src.length && /[_A-Za-z0-9]/.test(src.charAt(j))) j += 1;
+      const word = src.slice(i, j);
+      let k = j;
+      while (k < src.length && (src.charAt(k) === " " || src.charAt(k) === "\t")) k += 1;
+      let cls = "";
+      if (CPP_KW.has(word)) cls = "hl-kw";
+      else if (src.charAt(k) === "(") cls = "hl-fn";
+      else if (CPP_TYPE.has(word) || word.slice(-2) === "_t" || /^[A-Z]/.test(word)) cls = "hl-type";
+      html += cls ? '<span class="' + cls + '">' + esc(word) + "</span>" : esc(word);
+      i = j;
+      bol = false;
+      continue;
+    }
+    html += esc(c);
+    i += 1;
+    bol = false;
+  }
+  if (src.endsWith("\n")) html += "\u200b";
+  return html;
+}
+function cppIssues(text) {
+  const src = text || "";
+  const issues = [];
+  const code = [];
+  let i = 0;
+  let line = 1;
+  let bol = true;
+  const stack = [];
+  function add(ch) {
+    while (code.length < line) code.push("");
+    code[line - 1] += ch;
+  }
+  while (i < src.length) {
+    const c = src.charAt(i);
+    const n = src.charAt(i + 1);
+    if (c === "\n") { line += 1; bol = true; i += 1; continue; }
+    if (c === " " || c === "\t" || c === "\r") {
+      if (c !== "\r") add(" ");
+      i += 1;
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      const start = line;
+      i += 2;
+      while (i < src.length && !(src.charAt(i) === "*" && src.charAt(i + 1) === "/")) {
+        if (src.charAt(i) === "\n") line += 1;
+        i += 1;
+      }
+      if (i >= src.length) issues.push({line: start, message: "comment is missing */"});
+      else i += 2;
+      bol = false;
+      continue;
+    }
+    if (c === "/" && n === "/") {
+      i += 2;
+      while (i < src.length && src.charAt(i) !== "\n") i += 1;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const quote = c;
+      const start = line;
+      i += 1;
+      let closed = false;
+      while (i < src.length && src.charAt(i) !== "\n") {
+        if (src.charAt(i) === "\\") { i += 2; continue; }
+        if (src.charAt(i) === quote) { closed = true; i += 1; break; }
+        i += 1;
+      }
+      if (!closed) issues.push({line: start, message: quote === '"' ? "string is missing its closing quote" : "character is missing its closing quote"});
+      add(" ");
+      bol = false;
+      continue;
+    }
+    if (c === "#" && bol) {
+      while (i < src.length && src.charAt(i) !== "\n") {
+        if (src.charAt(i) === "\\" && src.charAt(i + 1) === "\n") { i += 2; line += 1; continue; }
+        i += 1;
+      }
+      continue;
+    }
+    bol = false;
+    if (c === "{" || c === "(" || c === "[") stack.push({ch: c, line: line});
+    else if (c === "}" || c === ")" || c === "]") {
+      const want = c === "}" ? "{" : c === ")" ? "(" : "[";
+      const name = c === "}" ? "}" : c === ")" ? ")" : "]";
+      if (!stack.length || stack[stack.length - 1].ch !== want) issues.push({line: line, message: "extra " + name});
+      else stack.pop();
+    }
+    add(c);
+    i += 1;
+  }
+  stack.forEach(item => {
+    const name = item.ch === "{" ? "}" : item.ch === "(" ? ")" : "]";
+    issues.push({line: item.line, message: "missing " + name});
+  });
+  let paren = 0;
+  let bracket = 0;
+  for (let index = 0; index < code.length; index += 1) {
+    const raw = code[index] || "";
+    const startParen = paren;
+    const startBracket = bracket;
+    for (let k = 0; k < raw.length; k += 1) {
+      const ch = raw.charAt(k);
+      if (ch === "(") paren += 1;
+      else if (ch === ")" && paren > 0) paren -= 1;
+      else if (ch === "[") bracket += 1;
+      else if (ch === "]" && bracket > 0) bracket -= 1;
+    }
+    const trimmed = raw.trim();
+    if (!trimmed || startParen > 0 || startBracket > 0 || paren > 0 || bracket > 0) continue;
+    if (/[;{},:\\]$/.test(trimmed) || /[+\-*/%=&|^<>?!~.]$/.test(trimmed)) continue;
+    let next = "";
+    for (let j = index + 1; j < code.length; j += 1) {
+      next = (code[j] || "").trim();
+      if (next) break;
+    }
+    if (!next || next.charAt(0) === "{" || next.charAt(0) === ";" || /^[+\-*/%=&|^<>?!~.]/.test(next)) continue;
+    if (/^(else|do|try)$/.test(trimmed) || /^else\s+if\b/.test(trimmed)) continue;
+    if (/^(if|for|while|switch|catch)\b/.test(trimmed)) continue;
+    if (/^(class|struct|enum|union|namespace|template|typedef)\b/.test(trimmed)) continue;
+    if (/^(public|private|protected)$/.test(trimmed)) continue;
+    const specWords = trimmed.replace(/[*&]/g, " $& ").trim().split(/\s+/);
+    const specSet = {const:1, volatile:1, static:1, extern:1, register:1, inline:1, mutable:1, virtual:1, unsigned:1, signed:1, short:1, long:1, int:1, char:1, void:1, float:1, double:1, bool:1, wchar_t:1, struct:1, class:1, enum:1, union:1, auto:1, "*":1, "&":1};
+    if (specWords.length && specWords.every(part => specSet[part])) continue;
+    const bare = /^(return|break|continue|throw)$/.test(trimmed);
+    if (bare && next.charAt(0) !== "}") continue;
+    if (/^[A-Za-z_][\w:]*$/.test(trimmed) && /^[*&A-Za-z_]/.test(next)) continue;
+    const compare = trimmed.replace(/[=!<>]=/g, "");
+    const assign = /=[^=]/.test(compare) || /\+=|-=|\*=|\/=|%=|&=|\|=|\^=|<<=|>>=/.test(trimmed);
+    const call = /\(/.test(trimmed) && /\)\s*$/.test(trimmed);
+    const returned = /^(return|throw|goto)\b\s+\S/.test(trimmed);
+    const decl = /^(?:(?:const|volatile|static|extern|register|inline|mutable|virtual|unsigned|signed|short|long|struct|class|enum|union)\s+)*[A-Za-z_][\w:]*\s+(?:[*&]\s*)*[A-Za-z_][\w:]*\s*(?:\[[^\]]*\])?\s*$/.test(trimmed);
+    if (bare || assign || call || returned || decl) issues.push({line: index + 1, message: "missing ;"});
+  }
+  const seen = {};
+  return issues.filter(item => {
+    const key = item.line + ":" + item.message;
+    if (seen[key]) return false;
+    seen[key] = true;
+    return item.line >= 1;
+  });
+}
+function syncCppMarks() {
+  const view = document.getElementById("cpp");
+  const gutter = document.getElementById("cpp-gutter");
+  const hl = document.getElementById("cpp-hl");
+  const lines = (view.value || "").split("\n");
+  cppChecks = cppIssues(view.value || "");
+  const bad = new Set();
+  buildErrors.forEach(item => {
+    const line = editorLine(item.line);
+    if (line >= 1 && line <= lines.length) bad.add(line);
+  });
+  const warn = {};
+  cppChecks.forEach(item => {
+    if (!warn[item.line]) warn[item.line] = [];
+    warn[item.line].push(item.message);
+  });
+  gutter.innerHTML = lines.map((_, index) => {
+    const number = index + 1;
+    if (bad.has(number)) return '<span class="err">' + number + "</span>";
+    if (warn[number]) return '<span class="warn" title="' + esc(warn[number].join(", ")).replace(/"/g, "&quot;") + '">' + number + "</span>";
+    return String(number);
+  }).join("\n");
+  gutter.scrollTop = view.scrollTop;
+  if (hl) {
+    hl.innerHTML = paintCpp(view.value || "");
+    hl.scrollTop = view.scrollTop;
+    hl.scrollLeft = view.scrollLeft;
+  }
+  refreshCppNote();
+}
+function refreshCppNote() {
+  const note = document.querySelector("#cpp").closest("section").querySelector("h2 span");
+  if (!note || cppOwner === "ai" || cppOwner === "ai-pending") return;
+  const total = lineCount(document.getElementById("cpp").value);
+  const count = buildErrors.filter(item => {
+    const line = editorLine(item.line);
+    return line >= 1 && line <= total;
+  }).length;
+  if (count) note.textContent = count + (count === 1 ? " compiler error" : " compiler errors");
+  else if (cppChecks.length === 1) note.textContent = cppChecks[0].message;
+  else if (cppChecks.length) note.textContent = cppChecks.length + " to check";
+  else if (/compiler error|to check|missing |extra |comment is|string is|character is/.test(note.textContent)) note.textContent = "your match source";
+}
+function showCaretTip() {
+  const view = document.getElementById("cpp");
+  const tip = document.getElementById("tip");
+  const pos = view.selectionStart || 0;
+  const line = view.value.slice(0, pos).split("\n").length;
+  const fileLine = cppFileLine + line - 1;
+  const errs = buildErrors.filter(item => item.line === fileLine);
+  const local = cppChecks.filter(item => item.line === line);
+  const fn = lookupFn(wordAt(view.value, pos));
+  if (!errs.length && !local.length && !fn) {
+    tip.className = "";
+    tip.hidden = true;
+    tip.innerHTML = "";
+    return;
+  }
+  let html = errs.map(item => esc(item.code + "  file line " + item.line + ": " + item.detail)).join("\n");
+  if (local.length) html += (html ? "\n" : "") + local.map(item => esc(item.message)).join("\n");
+  if (fn) {
+    let line = hex(fn.addr);
+    if (fn.loading) line += "  looking up";
+    else if (fn.missing) line += "  no function starts at this address";
+    else {
+      const score = fn.match_percent == null || fn.match_percent === "" ? "not scored" : pctText(fn.match_percent) + "%";
+      const where = fn.bank ? "  " + fn.bank : "";
+      line = (fn.name || line) + "  " + hex(fn.addr) + "  " + fn.size + " bytes  " + score + where;
+    }
+    html += (html ? "\n" : "") + esc(line);
+    if (!fn.loading && !fn.missing) html += ' <button type="button" id="tipopen">Open</button>';
+  }
+  tip.hidden = false;
+  tip.className = "show";
+  tip.innerHTML = html;
+  const open = document.getElementById("tipopen");
+  if (open) open.addEventListener("click", () => openFunction(fn.addr).catch(err => setStatus(err.message, true)));
+}
+async function openFunction(addr) {
+  const data = await api("/api/function?addr=" + addr);
+  const select = document.getElementById("bank");
+  if (select.value !== data.bank) {
+    select.value = data.bank;
+    await refreshBanks();
+    functions = await api("/api/functions?bank=" + encodeURIComponent(data.bank));
+    renderFunctions();
+  }
+  await loadFunction(addr);
+}
+function takeBuildErrors(log) {
+  buildErrors = parseBuildErrors(log);
+  syncCpp();
+  const view = document.getElementById("cpp");
+  const total = lineCount(view.value);
+  const here = buildErrors.filter(item => {
+    const line = editorLine(item.line);
+    return line >= 1 && line <= total;
+  });
+  if (here.length) {
+    showCaretTip();
+    return;
+  }
+  const tip = document.getElementById("tip");
+  if (!buildErrors.length) {
+    tip.hidden = true;
+    tip.className = "";
+    tip.innerHTML = "";
+    return;
+  }
+  const item = buildErrors[0];
+  tip.hidden = false;
+  tip.className = "show";
+  tip.textContent = item.code + " is at file line " + item.line + ", outside the function open now. " + item.detail;
+}
 function watch(viewId) {
   const view = document.getElementById(viewId);
   const gutter = document.getElementById(viewId + "-gutter");
-  view.addEventListener("scroll", () => { gutter.scrollTop = view.scrollTop; });
+  view.addEventListener("scroll", () => {
+    gutter.scrollTop = view.scrollTop;
+    const hl = document.getElementById("cpp-hl");
+    if (hl && view.id === "cpp") {
+      hl.scrollTop = view.scrollTop;
+      hl.scrollLeft = view.scrollLeft;
+    }
+  });
   return () => syncGutter(view, gutter);
 }
 const syncCpp = watch("cpp");
@@ -340,8 +804,25 @@ const syncAsm = watch("asm");
 const syncSrc = watch("srcasm");
 document.getElementById("cpp").addEventListener("input", () => {
   cppOwner = "user";
+  if (buildErrors.length) buildErrors = [];
   syncCpp();
   document.getElementById("save").textContent = document.getElementById("cpp").value === saved ? "Save" : "Save *";
+  showCaretTip();
+});
+document.getElementById("cpp").addEventListener("keyup", showCaretTip);
+document.getElementById("cpp").addEventListener("click", event => {
+  if (!(event.ctrlKey || event.metaKey)) {
+    showCaretTip();
+    return;
+  }
+  const view = document.getElementById("cpp");
+  const fn = lookupFn(wordAt(view.value, view.selectionStart || 0));
+  if (!fn) {
+    showCaretTip();
+    return;
+  }
+  event.preventDefault();
+  openFunction(fn.addr).catch(err => setStatus(err.message, true));
 });
 
 function paintAsm(text) {
@@ -402,10 +883,12 @@ function renderFunctions() {
     const issue = !inReport && Number(fn.match_percent) >= 100;
     const touchedText = level === "none" ? "not touched" : "touched " + pctText(fn.match_percent) + "%";
     const reportText = inReport ? "in the report at " + pctText(fn.report_percent) + "%" : (issue ? "100% but not in the report" : "not in the report");
-    button.title = addr + "  " + fn.size + " bytes  " + touchedText + "  " + reportText;
+    button.title = (fn.name || addr) + "\n" + addr + "  " + fn.size + " bytes  " + touchedText + "  " + reportText;
     const addrNode = document.createElement("span");
     addrNode.className = "addr";
-    addrNode.textContent = addr;
+    const plain = (fn.name || "").toLowerCase();
+    const named = plain && plain !== "fn_" + addr.toLowerCase() && plain !== "_fn_" + addr.toLowerCase();
+    addrNode.textContent = named ? fn.name : addr;
     const meter = document.createElement("span");
     meter.className = "meter " + level;
     const fill = document.createElement("i");
@@ -415,14 +898,10 @@ function renderFunctions() {
     const pct = document.createElement("span");
     pct.className = "pct " + level;
     pct.textContent = pctText(fn.match_percent);
-    button.appendChild(addrNode);
-    const nameNode = document.createElement("span");
-    nameNode.className = "name";
-    nameNode.textContent = fn.name || "";
-    button.appendChild(nameNode);
     const flag = document.createElement("span");
     flag.className = "flag" + (inReport ? " reported" : (issue ? " issue" : ""));
     flag.textContent = inReport ? pctText(fn.report_percent) : (issue ? "missing" : "—");
+    button.appendChild(addrNode);
     button.appendChild(meter);
     button.appendChild(pct);
     button.appendChild(flag);
@@ -436,9 +915,9 @@ function renderFunctions() {
   });
   const progress = document.getElementById("progress");
   if (!functions.length) progress.textContent = "No functions";
-  else progress.textContent = scored + " touched · " + reported + " in the report · " + functions.length + " functions";
+  else if (query) progress.textContent = shown + " shown";
+  else progress.textContent = functions.length + " functions";
   if (missing) progress.textContent += " · " + missing + " at 100% not in the report";
-  if (query) progress.textContent += " · " + shown + " shown";
 }
 function setMatch(percent, reportPercent) {
   const node = document.getElementById("match");
@@ -564,6 +1043,12 @@ async function loadBanks() {
     setStatus("No banks in config/splits.txt", true);
     return;
   }
+  const wanted = restorePlace ? params.get("bank") : "";
+  const select = document.getElementById("bank");
+  if (wanted && [...select.options].some(opt => opt.value === wanted)) {
+    select.value = wanted;
+    paintBanks(banks);
+  }
   await loadFunctions();
 }
 async function refreshBanks() {
@@ -574,7 +1059,14 @@ async function loadFunctions() {
   functions = await api("/api/functions?bank=" + encodeURIComponent(name));
   setStatus(functions.length + " functions");
   renderFunctions();
-  if (functions.length) await loadFunction(functions[0].addr);
+  let addr = functions.length ? functions[0].addr : 0;
+  if (restorePlace) {
+    const wanted = (params.get("fn") || "").toLowerCase();
+    const match = functions.find(fn => hex(fn.addr).toLowerCase() === wanted);
+    if (match) addr = match.addr;
+    restorePlace = false;
+  }
+  if (addr) await loadFunction(addr);
 }
 function showPseudo(token, addr, text) {
   const waiting = text.indexOf("Ghidra is analyzing") >= 0;
@@ -601,40 +1093,54 @@ function showPseudo(token, addr, text) {
 async function loadFunction(addr) {
   const token = ++loadToken;
   setStatus("Loading " + hex(addr));
-  document.getElementById("build").disabled = true;
-  document.getElementById("diff").disabled = true;
-  document.getElementById("save").disabled = true;
-  document.getElementById("draft").disabled = true;
-  document.getElementById("ask").disabled = true;
-  document.getElementById("clearattempts").disabled = true;
-  const data = await api("/api/function?addr=" + addr);
+  jobButtons(true);
+  let data;
+  try {
+    data = await api("/api/function?addr=" + addr);
+  } catch (err) {
+    if (token === loadToken) {
+      jobButtons(false);
+      setPlain("srcasm", err.message, true);
+      paneNote("srcasm", "could not load this function");
+      setStatus(err.message, true);
+    }
+    return;
+  }
   if (token !== loadToken) return;
   current = data;
   saved = data.cpp || "";
+  previousCode = null;
   cppOwner = "load";
   document.getElementById("cpp").value = saved;
   document.querySelector("#cpp").closest("section").querySelector("h2 span").textContent = "your match source";
   document.getElementById("fnlabel").textContent = hex(data.addr) + "   " + data.size + " bytes";
   document.getElementById("fnname").value = data.name || "";
-  document.getElementById("fnname").disabled = false;
-  document.getElementById("rename").disabled = false;
+  document.getElementById("fnend").value = hex(data.addr + data.size);
+  const summary = document.getElementById("fnsummary");
+  if (summary) summary.textContent = "This function · ends " + hex(data.addr + data.size);
+  cppFileLine = data.line || 1;
   const listed = functions.find(fn => fn.addr === data.addr);
   setMatch(listed ? listed.match_percent : null, listed ? listed.report_percent : null);
   document.getElementById("save").textContent = "Save";
-  document.getElementById("save").disabled = false;
-  document.getElementById("build").disabled = false;
-  document.getElementById("diff").disabled = false;
-  document.getElementById("draft").disabled = false;
-  document.getElementById("ask").disabled = false;
-  document.getElementById("clearattempts").disabled = false;
+  try {
+    const undo = await api("/api/split-undo");
+    if (token !== loadToken) return;
+    endUndo = !!(undo && undo.available);
+  } catch (err) {
+    if (token !== loadToken) return;
+    endUndo = false;
+  }
+  jobButtons(false);
+  rememberPlace();
   syncCpp();
+  showCaretTip();
   setAsm("asm", data.assembly);
   setPlain("srcasm", data.source_assembly, true);
   setPlain("pseudo", "Starting Ghidra…", true);
   renderFunctions();
   const selected = document.querySelector("#fns button.on");
   if (selected) selected.scrollIntoView({block: "nearest"});
-  setStatus(hex(data.addr));
+  setStatus("");
   try {
     const pseudo = await api("/api/pseudo?addr=" + addr);
     if (token !== loadToken) return;
@@ -699,19 +1205,46 @@ function paneNote(id, text) {
   document.querySelector("#" + id).closest("section").querySelector("h2 span").textContent = text;
 }
 function jobButtons(disabled) {
-  document.getElementById("build").disabled = disabled || !current;
-  document.getElementById("diff").disabled = disabled || !current;
+  const idle = disabled || !current;
+  document.getElementById("build").disabled = idle;
+  document.getElementById("diff").disabled = idle;
+  document.getElementById("save").disabled = idle;
+  document.getElementById("draft").disabled = idle;
+  document.getElementById("ask").disabled = idle;
+  document.getElementById("clearattempts").disabled = idle;
+  document.getElementById("rename").disabled = idle;
+  document.getElementById("fnname").disabled = idle;
+  document.getElementById("setend").disabled = idle;
+  document.getElementById("fnend").disabled = idle;
+  document.getElementById("joinprev").disabled = idle;
+  document.getElementById("undoend").disabled = idle || !endUndo;
   document.getElementById("report").disabled = disabled;
   document.getElementById("report100").disabled = disabled;
-  document.getElementById("rename").disabled = disabled || !current;
-  document.getElementById("save").disabled = disabled || !current;
+  document.getElementById("revert").disabled = disabled || previousCode == null;
+}
+function rememberPlace() {
+  if (!project) return;
+  const url = new URL(location.href);
+  const bank = document.getElementById("bank").value;
+  if (bank) url.searchParams.set("bank", bank);
+  if (current) url.searchParams.set("fn", hex(current.addr));
+  history.replaceState(null, "", url.pathname + "?" + url.searchParams.toString());
 }
 async function pollJob() {
-  const data = await api("/api/job");
+  let data;
+  try {
+    data = await api("/api/job");
+  } catch (err) {
+    jobButtons(false);
+    setPlain("srcasm", err.message, true);
+    paneNote("srcasm", "request failed");
+    setStatus(err.message, true);
+    return;
+  }
   if (data.running) {
     document.getElementById("progress").textContent = data.note || data.phase || "";
     setStatus(data.note || data.phase || "");
-    setTimeout(() => pollJob().catch(err => setStatus(err.message, true)), 800);
+    setTimeout(() => pollJob(), 800);
     return;
   }
   jobButtons(false);
@@ -725,6 +1258,7 @@ async function pollJob() {
   }
   if (data.error) {
     setPlain("srcasm", data.error, true);
+    if (data.kind === "build") takeBuildErrors(data.error);
     paneNote("srcasm", data.kind === "report" ? "report failed" : "build failed");
     document.getElementById("report").textContent = "Report";
     document.getElementById("report100").textContent = "Report 100s";
@@ -733,6 +1267,9 @@ async function pollJob() {
     return;
   }
   if (data.kind === "build") {
+    buildErrors = [];
+    syncCpp();
+    showCaretTip();
     document.getElementById("save").textContent = "Save";
     paneNote("srcasm", "from this build");
     setAsm("srcasm", result.source_assembly || "");
@@ -862,10 +1399,97 @@ document.getElementById("clearattempts").addEventListener("click", () => {
   }).catch(err => setStatus(err.message, true))
     .finally(() => { button.disabled = false; });
 });
+document.getElementById("revert").addEventListener("click", () => {
+  if (!current || previousCode == null) return;
+  document.getElementById("cpp").value = previousCode;
+  cppOwner = "user";
+  syncCpp();
+  document.getElementById("save").textContent = previousCode === saved ? "Save" : "Save *";
+  noteCpp("your match source");
+  setStatus("Restored the C from before Ask AI replaced it.");
+});
+function parseEnd(text) {
+  const raw = String(text || "").trim().replace(/^0x/i, "");
+  if (!/^[0-9A-Fa-f]+$/.test(raw)) return null;
+  return parseInt(raw, 16);
+}
+async function applyEnd(addr, end) {
+  const data = await api("/api/split", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({addr: addr, end: end}),
+  });
+  const bank = document.getElementById("bank").value;
+  functions = await api("/api/functions?bank=" + encodeURIComponent(bank));
+  renderFunctions();
+  return data;
+}
+document.getElementById("setend").addEventListener("click", () => {
+  if (!current) return;
+  const end = parseEnd(document.getElementById("fnend").value);
+  if (end == null) {
+    setStatus("Enter the end address in hex.", true);
+    return;
+  }
+  jobButtons(true);
+  setStatus("Setting the end to " + hex(end));
+  applyEnd(current.addr, end).then(data => {
+    setStatus(data.note || "Updated the function end.", !data.end);
+    if (data.end) return loadFunction(current.addr);
+    jobButtons(false);
+  }).catch(err => {
+    jobButtons(false);
+    setStatus(err.message, true);
+  });
+});
+document.getElementById("undoend").addEventListener("click", () => {
+  if (!current || !endUndo) return;
+  const back = current.addr;
+  jobButtons(true);
+  setStatus("Restoring the previous function end");
+  api("/api/split-undo", {method: "POST"}).then(async data => {
+    setStatus(data.note || "Restored the previous function end.", !data.undone);
+    if (!data.undone) {
+      endUndo = false;
+      jobButtons(false);
+      return;
+    }
+    const bank = document.getElementById("bank").value;
+    functions = await api("/api/functions?bank=" + encodeURIComponent(bank));
+    renderFunctions();
+    return loadFunction(back);
+  }).catch(err => {
+    jobButtons(false);
+    setStatus(err.message, true);
+  });
+});
+document.getElementById("joinprev").addEventListener("click", () => {
+  if (!current) return;
+  const index = functions.findIndex(fn => fn.addr === current.addr);
+  if (index <= 0) {
+    setStatus("This is the first function in the bank.", true);
+    return;
+  }
+  const previous = functions[index - 1];
+  const row = functions[index];
+  jobButtons(true);
+  setStatus("Joining into " + hex(previous.addr));
+  applyEnd(previous.addr, row.end).then(data => {
+    setStatus(data.note || "Joined into the previous function.", !data.end);
+    if (data.end) return loadFunction(previous.addr);
+    jobButtons(false);
+  }).catch(err => {
+    jobButtons(false);
+    setStatus(err.message, true);
+  });
+});
 document.getElementById("ask").addEventListener("click", () => {
   if (!current) return;
   const token = loadToken;
   const button = document.getElementById("ask");
+  const editor = document.getElementById("cpp");
+  if (cppOwner !== "ai") previousCode = editor.value;
+  document.getElementById("revert").disabled = previousCode == null;
   button.disabled = true;
   cppOwner = "ai-pending";
   setStatus("Asking qwen3.6. The first reply can take a few minutes while the model loads.");
@@ -1056,7 +1680,12 @@ document.addEventListener("keydown", event => {
     saveCode().catch(err => setStatus(err.message, true));
   } else if (event.key === "Enter") {
     event.preventDefault();
-    buildCode().catch(err => setStatus(err.message, true));
+    buildCode().catch(err => {
+      jobButtons(false);
+      setPlain("srcasm", err.message, true);
+      paneNote("srcasm", "build failed");
+      setStatus(err.message, true);
+    });
   }
 });
 if (!project) {
@@ -1115,6 +1744,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/banks":
                 self._json(proj.banks())
+            elif parsed.path == "/api/fn":
+                self._json(proj.function_brief(int(query["addr"][0], 0)))
             elif parsed.path == "/api/functions":
                 self._json(proj.functions(query["bank"][0]))
             elif parsed.path == "/api/function":
@@ -1128,9 +1759,12 @@ class Handler(BaseHTTPRequestHandler):
                     "size": row["size"],
                     "bank": bank["name"],
                     "cpp": proj.read_cpp(bank["name"], addr),
+                    "line": proj.cpp_file_line(bank["name"], addr),
                     "assembly": proj.assembly(addr, row["size"]),
                     "source_assembly": proj.source_assembly(bank["name"], addr),
                 })
+            elif parsed.path == "/api/split-undo":
+                self._json({"available": proj.end_undo_available()})
             elif parsed.path == "/api/pseudo":
                 addr = int(query["addr"][0], 0)
                 self._json({"text": proj.pseudo_c(addr)})
@@ -1191,6 +1825,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "missing addr"}, 400)
                     return
                 self._json(local_ai.clear_attempts(proj.root, int(body["addr"])))
+            elif parsed.path == "/api/split":
+                addr = int(body["addr"])
+                end = int(body["end"])
+                self._json(proj.apply_split(addr, end))
+            elif parsed.path == "/api/split-undo":
+                self._json(proj.undo_split())
             elif parsed.path == "/api/ask":
                 import local_ai
                 addr = int(body["addr"])

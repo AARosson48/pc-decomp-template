@@ -3,6 +3,8 @@
 
 Cuts land on 4-aligned function starts: the image entry, call targets, and
 bytes that follow MSVC int 3 padding. A jump stays in the function above it.
+An address that lands inside an instruction stays in that function too. A
+0xCC byte in a displacement or ModRM byte is not padding.
 This is the first split, before any original .cpp path is known.
 """
 
@@ -98,10 +100,43 @@ def function_starts(blob, text_va):
             starts.add(start)
         index = max(end, index + 1)
     # An unconditional jump is the end of the function above it, not a new one.
-    return {
+    starts = {
         addr for addr in starts
         if not _starts_with_jump(blob, text_va, addr)
     }
+    return _drop_interior_starts(blob, text_va, starts)
+
+
+def _drop_interior_starts(blob, text_va, starts):
+    """A start inside an instruction of the function above it is not a function."""
+    try:
+        from capstone import CS_ARCH_X86, CS_MODE_32, Cs
+    except ImportError:
+        return starts
+    ordered = sorted(starts)
+    if len(ordered) < 2:
+        return starts
+    decoder = Cs(CS_ARCH_X86, CS_MODE_32)
+    kept = [ordered[0]]
+    limit = len(blob)
+    for addr in ordered[1:]:
+        prev = kept[-1]
+        off = prev - text_va
+        stop = addr - text_va
+        if off < 0 or stop > limit:
+            kept.append(addr)
+            continue
+        window = blob[off:min(limit, stop + 15)]
+        interior = False
+        for insn in decoder.disasm(window, prev):
+            if insn.address >= addr:
+                break
+            if insn.address < addr < insn.address + insn.size:
+                interior = True
+                break
+        if not interior:
+            kept.append(addr)
+    return set(kept)
 
 
 def _starts_with_jump(blob, text_va, addr):

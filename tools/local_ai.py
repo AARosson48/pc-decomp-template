@@ -82,11 +82,24 @@ def _ask(project_root, model, addr, pseudo, cpp, assembly, compiled, score):
     return result
 
 
+_COMPILER_ERROR_RE = re.compile(r"(?:fatal error|(?:^|\s)error)\s+C\d+|^FAILED:|ninja: build stopped", re.I)
+
+
+def _compiler_errors(compiled):
+    found = []
+    for line in (compiled or "").splitlines():
+        text = line.strip()
+        if text and _COMPILER_ERROR_RE.search(text) and text not in found:
+            found.append(text)
+    return found
+
+
 def _prompt(project_root, name, pseudo, cpp, assembly, compiled, changes, score, failed):
     project, exe = _project_facts(project_root)
     score_line = _score_line(score)
-    if "error C" in (compiled or ""):
-        problem = "The C/C++ code does not compile."
+    errors = _compiler_errors(compiled)
+    if errors:
+        problem = "The C/C++ code does not compile. Fix the compiler errors in this prompt before chasing an assembly match."
     elif changes.startswith("The instruction lists already"):
         problem = "The C/C++ code already matches the source assembly."
     else:
@@ -108,32 +121,39 @@ def _prompt(project_root, name, pseudo, cpp, assembly, compiled, changes, score,
         "Do not write about optimization, nop padding, volatile, or inline assembly.",
         "Do not use volatile, __asm, or a cast whose purpose is to stop the compiler from deleting code.",
         "",
-        "Fix these assembly differences:",
     ]
+    if errors:
+        lines.append("COMPILER ERRORS")
+        lines.append("The last build failed. These are the compiler errors. The new C must not produce them.")
+        lines.extend(errors[:40])
+        lines.append("")
+    else:
+        lines.append("Fix these assembly differences:")
     compiled_rows = _insns(compiled)
-    if compiled_rows and all(row == "nop" or row.startswith("nop ") for row in compiled_rows):
+    if not errors and compiled_rows and all(row == "nop" or row.startswith("nop ") for row in compiled_rows):
         lines.append("The compiled listing is only nop. That is padding, not this function. Ignore it and follow the source assembly.")
     padding = _padding_split(assembly)
     if padding:
         lines.append("Padding nops start at %s. Those nops are not part of this function." % padding)
         lines.append("Before the C, write this line so Ghidra splits the function there: SPLIT %s" % padding)
-    actions = _actions(assembly, compiled)
-    if actions:
-        lines.extend(actions)
-    elif changes and not changes.startswith("The instruction"):
-        lines.append(changes)
-    else:
-        lines.append("No instruction difference was found.")
+    if not errors:
+        actions = _actions(assembly, compiled)
+        if actions:
+            lines.extend(actions)
+        elif changes and not changes.startswith("The instruction"):
+            lines.append(changes)
+        else:
+            lines.append("No instruction difference was found.")
     lines.extend(_best_lines(failed, score))
     lines.extend(_failed_lines(failed, score))
     lines.extend([
         "",
         "SOURCE ASSEMBLY",
         "This is the target. The new C must compile to these instructions.",
-        _clip(assembly),
+        _whole(assembly),
         "",
-        "COMPILED ASSEMBLY",
-        "This is what the current C compiled to. It is wrong where it differs from the source assembly.",
+        "COMPILER OUTPUT" if errors else "COMPILED ASSEMBLY",
+        "This is the build log. Fix the compiler errors above." if errors else "This is what the current C compiled to. It is wrong where it differs from the source assembly.",
         _clip(compiled),
         "",
         "C/C++ CODE",
@@ -612,6 +632,14 @@ def _clip(text):
     if len(text) <= _LIMIT:
         return text
     return text[:_LIMIT] + "\n..."
+
+
+def _whole(text):
+    """The target listing is the function. Cutting it hides the instructions that have to match."""
+    text = (text or "").strip()
+    if len(text) <= 200000:
+        return text
+    return text[:200000] + "\n... The rest of this function was cut."
 
 
 _CODE_START = re.compile(

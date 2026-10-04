@@ -265,11 +265,7 @@ class Project:
         by_addr = self._symbols_by_addr()
         undname = self._undname()
         rows = []
-        for index, start in enumerate(starts):
-            end = starts[index + 1] if index + 1 < len(starts) else bank["end"]
-            forced = overrides.get("%08X" % start)
-            if forced and start < forced <= end:
-                end = forced
+        for start, end in _ranged_starts(starts, bank["end"], overrides):
             key = "_fn_%08X" % start
             symbol = by_addr.get(start) or key
             rows.append({
@@ -282,6 +278,19 @@ class Project:
                 "report_percent": reported.get(key),
             })
         return rows
+
+    def function_brief(self, addr):
+        bank = bank_of(self, addr)
+        row = next(item for item in self.functions(bank["name"]) if item["addr"] == addr)
+        return {
+            "addr": row["addr"],
+            "end": row["end"],
+            "size": row["size"],
+            "name": row["name"],
+            "bank": bank["name"],
+            "match_percent": row["match_percent"],
+            "report_percent": row["report_percent"],
+        }
 
     def _bytes(self, addr, size):
         self._load_text()
@@ -317,6 +326,18 @@ class Project:
         if stop < 0:
             return text[begin:]
         return text[begin + len(start):stop].strip("\n")
+
+    def cpp_file_line(self, bank_name, addr):
+        text = _read(self.cpp_path(bank_name))
+        marker = FN_START % addr
+        begin = text.find(marker)
+        if begin < 0:
+            return 1
+        end = FN_END % addr
+        stop = text.find(end, begin)
+        raw = text[begin + len(marker):] if stop < 0 else text[begin + len(marker):stop]
+        leading = len(raw) - len(raw.lstrip("\n"))
+        return text.count("\n", 0, begin) + 2 + raw[:leading].count("\n")
 
     def _stub(self, addr):
         return "extern \"C\" int _fn_%08X(void)\n{\n    return 0;\n}" % addr
@@ -422,26 +443,59 @@ class Project:
         rewritten, _existed = names.rewrite_symbol_line(text, addr, current, size)
         _write(path, rewritten if rewritten.endswith("\n") else rewritten + "\n")
 
+    def _drop_symbol(self, addr):
+        path = os.path.join(self.root, "config", "dtk_symbols.txt")
+        text = _read(path)
+        updated = re.sub(r"(?m)^.*\.text:0x%08X;.*(?:\r?\n)?" % addr, "", text)
+        if updated != text:
+            _write(path, updated if updated.endswith("\n") or not updated else updated + "\n")
+
     def pseudo_c(self, addr):
         import ghidra_session
-        return ghidra_session.decompile(self.root, self.exe_path(), addr)
+        end = None
+        try:
+            bank = bank_of(self, addr)
+            row = next(item for item in self.functions(bank["name"]) if item["addr"] == addr)
+            end = row["end"]
+        except (StopIteration, KeyError, OSError, ValueError):
+            end = None
+        return ghidra_session.decompile(self.root, self.exe_path(), addr, end)
 
     def apply_split(self, addr, end):
         bank = bank_of(self, addr)
-        row = next(item for item in self.functions(bank["name"]) if item["addr"] == addr)
-        if not (addr < end <= row["end"]):
-            return {"note": "That end is outside this function.", "pseudo": ""}
+        rows = self.functions(bank["name"])
+        row = next(item for item in rows if item["addr"] == addr)
+        if end <= addr or end > bank["end"]:
+            return {"note": "That address is outside this bank. It has to be after %08X and no later than %08X." % (addr, bank["end"]), "pseudo": ""}
+        if end == row["end"]:
+            return {"note": "This function already ends at %08X." % end, "pseudo": "", "end": end, "size": row["size"], "assembly": self.assembly(addr, row["size"])}
+        before = {item["addr"] for item in rows}
         path = os.path.join(self.root, "build", "function_ends.json")
-        data = {}
-        if os.path.isfile(path):
-            try:
-                with open(path, "r", encoding="utf-8") as handle:
-                    data = json.load(handle) or {}
-            except (OSError, ValueError):
-                data = {}
+        data = self._read_function_ends()
+        symbols = _read(os.path.join(self.root, "config", "dtk_symbols.txt"))
+        scores = self._read_scores(
+            os.path.join(self.root, "build", "diff", "scores.json"),
+            os.path.join(self.root, "build", "scores.json"),
+        )
+        kept_scores = {}
+        for item in before:
+            key = "_fn_%08X" % item
+            if key in scores:
+                kept_scores[key] = scores[key]
+        self._push_end_history(data, symbols, kept_scores)
+        data = dict(data)
         data["%08X" % addr] = end
         _write(path, json.dumps(data, indent=2) + "\n")
         self._forget_score("_fn_%08X" % addr)
+        after = self.functions(bank["name"])
+        for gone in before - {item["addr"] for item in after}:
+            self._forget_score("_fn_%08X" % gone)
+            self._drop_symbol(gone)
+        kept = next(item for item in after if item["addr"] == addr)
+        self._ensure_symbol(addr, kept["size"])
+        if any(item["addr"] == end for item in after):
+            nxt = next(item for item in after if item["addr"] == end)
+            self._ensure_symbol(end, nxt["size"])
         import ghidra_session
         text = ghidra_session.split_function(self.root, self.exe_path(), addr, end)
         return {
@@ -452,7 +506,50 @@ class Project:
             "note": "Ghidra now ends this function at %08X." % end,
         }
 
-    def _function_ends(self):
+    def _end_history_path(self):
+        return os.path.join(self.root, "build", "function_end_history.json")
+
+    def _read_end_history(self):
+        path = self._end_history_path()
+        if not os.path.isfile(path):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle) or []
+        except (OSError, ValueError):
+            return []
+        return data if isinstance(data, list) else []
+
+    def _push_end_history(self, ends, symbols, scores):
+        history = self._read_end_history()
+        history.append({"ends": ends, "symbols": symbols, "scores": scores})
+        history = history[-10:]
+        _write(self._end_history_path(), json.dumps(history) + "\n")
+
+    def end_undo_available(self):
+        return bool(self._read_end_history())
+
+    def undo_split(self):
+        history = self._read_end_history()
+        if not history:
+            return {"note": "There is no function-end edit to undo.", "undone": False}
+        snap = history.pop()
+        ends = snap.get("ends") or {}
+        _write(os.path.join(self.root, "build", "function_ends.json"), json.dumps(ends, indent=2) + "\n")
+        symbols = snap.get("symbols")
+        if isinstance(symbols, str):
+            _write(os.path.join(self.root, "config", "dtk_symbols.txt"), symbols if symbols.endswith("\n") or not symbols else symbols + "\n")
+        saved = snap.get("scores") or {}
+        if saved:
+            path = os.path.join(self.root, "build", "diff", "scores.json")
+            current = self._read_scores(path, os.path.join(self.root, "build", "scores.json"))
+            current.update(saved)
+            _write(path, json.dumps(current, indent=2, sort_keys=True) + "\n")
+            self._score_cache = None
+        _write(self._end_history_path(), json.dumps(history) + "\n")
+        return {"note": "Restored the function boundaries from before the last edit.", "undone": True}
+
+    def _read_function_ends(self):
         path = os.path.join(self.root, "build", "function_ends.json")
         if not os.path.isfile(path):
             return {}
@@ -461,6 +558,10 @@ class Project:
                 data = json.load(handle) or {}
         except (OSError, ValueError):
             return {}
+        return data if isinstance(data, dict) else {}
+
+    def _function_ends(self):
+        data = self._read_function_ends()
         found = {}
         for key, value in data.items():
             try:
@@ -1812,6 +1913,36 @@ def _match_percent(node, name):
 
     walk(node)
     return found
+
+
+def _ranged_starts(starts, bank_end, overrides):
+    """Apply a user end even when it joins the next function or cuts this one."""
+    pending = list(starts)
+    ranges = []
+    index = 0
+    while index < len(pending):
+        start = pending[index]
+        natural = pending[index + 1] if index + 1 < len(pending) else bank_end
+        forced = overrides.get("%08X" % start)
+        end = natural
+        if isinstance(forced, int) and start < forced <= bank_end:
+            end = forced
+        ranges.append((start, end))
+        if end == natural:
+            index += 1
+            continue
+        if end < natural:
+            if end not in pending:
+                pending.append(end)
+                pending.sort()
+            index = pending.index(end)
+            continue
+        index += 1
+        while index < len(pending) and pending[index] < end:
+            index += 1
+        if end < bank_end and (index >= len(pending) or pending[index] != end):
+            pending.insert(index, end)
+    return ranges
 
 
 def bank_of(project, addr):

@@ -22,8 +22,8 @@ _SESSIONS_LOCK = threading.Lock()
 _CREATE_NO_WINDOW = 0x08000000
 
 
-def decompile(project_root, exe, addr):
-    return _session(project_root, exe).decompile(addr)
+def decompile(project_root, exe, addr, end=None):
+    return _session(project_root, exe).decompile(addr, end)
 
 
 def split_function(project_root, exe, start, end):
@@ -52,14 +52,18 @@ class GhidraSession:
         self.proc = None
         self.failed = ""
 
-    def decompile(self, addr):
+    def decompile(self, addr, end=None):
         with self.lock:
             message = self._ensure()
             if message:
                 return message
             port = self._port()
+        if end and end > addr:
+            line = "SPLIT %X %X" % (addr, end)
+        else:
+            line = "0x%X" % addr
         try:
-            return _ask(port, "0x%X" % addr)
+            return _ask(port, line)
         except (OSError, ValueError) as exc:
             return "Ghidra did not answer for this function.\n(%s)" % exc
 

@@ -415,6 +415,20 @@ def _fix_second_linkage(text, error, source, lines):
     return updated, "C2733 %s: removed the second declaration" % name, True
 
 
+def _fix_pointer_bitwise(text, error, source, _lines):
+    detail = error.get("detail") or ""
+    if "left operand has type" not in detail or "*" not in detail:
+        return text, _open(error), False
+    updated = re.sub(r"\(([A-Za-z_]\w*)\)\s*(>>|<<)", r"((unsigned int)\1) \2", source)
+    updated = re.sub(r"\(([A-Za-z_]\w*)\s*&", r"((unsigned int)\1 &", updated)
+    assign = re.match(r"^(\s*)([A-Za-z_]\w*)\s*=\s*(.+);\s*$", updated)
+    if assign and not assign.group(3).lstrip().startswith("(unsigned char *)"):
+        updated = "%s%s = (unsigned char *)(%s);" % (assign.group(1), assign.group(2), assign.group(3))
+    if updated == source:
+        return text, _open(error), False
+    return text.replace(source, updated, 1), "C2296 line %s: cast the pointer before the bitwise operator" % error["line"], True
+
+
 def _fix_redefinition(text, error, _source, _lines):
     name = _quoted_name(error["detail"])
     if not name:
@@ -445,4 +459,5 @@ _HANDLERS = {
     "C2440": _fix_convert,
     "C2371": _fix_redefinition,
     "C2733": _fix_second_linkage,
+    "C2296": _fix_pointer_bitwise,
 }
